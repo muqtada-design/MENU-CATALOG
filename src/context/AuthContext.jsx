@@ -1,4 +1,6 @@
 import React, { createContext, useContext, useState } from 'react';
+import { collection, query, where, getDocs } from 'firebase/firestore';
+import { db } from '../firebase/config';
 
 const AuthContext = createContext();
 
@@ -7,32 +9,58 @@ export const useAuth = () => useContext(AuthContext);
 export const AuthProvider = ({ children }) => {
   // Hardcoded demo users for the 4 roles
   const [users] = useState([
-    { id: 'u1', name: 'التاجر (المدير)', email: 'admin@apex.com', password: 'demo123', role: 'admin' },
-    { id: 'u2', name: 'سارة - مندوب مبيعات', email: 'sara@apex.com', password: 'demo123', role: 'sales_rep' },
-    { id: 'u3', name: 'سامي - مندوب مبيعات', email: 'sami@apex.com', password: 'demo123', role: 'sales_rep' },
-    { id: 'u4', name: 'طارق - أمين المخزن', email: 'tariq@apex.com', password: 'demo123', role: 'storekeeper' },
+    { id: 'u1', name: 'التاجر (المدير)', email: 'admin@apex.com', password: '000000', role: 'admin' },
+    { id: 'u2', name: 'سارة - مندوب مبيعات', email: 'sara@apex.com', password: '222222', role: 'sales_rep' },
+    { id: 'u3', name: 'سامي - مندوب مبيعات', email: 'sami@apex.com', password: '333333', role: 'sales_rep' },
+    { id: 'u4', name: 'طارق - أمين المخزن', email: 'tariq@apex.com', password: '111111', role: 'storekeeper' },
     { id: 'u5', name: 'الزبون (عام)', email: '', password: '', role: 'customer' }
   ]);
 
-  // For real app, this would be an auth token or session.
-  // Default to customer role (unauthenticated state for public UI)
   const [currentUser, setCurrentUser] = useState(null);
   const [userRole, setUserRole] = useState('customer'); 
 
-  // Simulate Firebase Auth Login
+  const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
+  const openLoginModal = () => setIsLoginModalOpen(true);
+  const closeLoginModal = () => setIsLoginModalOpen(false);
+
+  // Authenticate via Firestore
   const login = async (email, password) => {
-    return new Promise((resolve) => {
-      setTimeout(() => {
-        const user = users.find(u => u.email === email && u.password === password);
-        if (user) {
-          setCurrentUser(user);
-          setUserRole(user.role);
-          resolve({ success: true, user });
-        } else {
-          resolve({ success: false, error: 'البريد الإلكتروني أو كلمة المرور غير صحيحة.' });
+    try {
+      const q = query(collection(db, 'users'), where('email', '==', email));
+      const querySnapshot = await getDocs(q);
+      
+      if (!querySnapshot.empty) {
+        const userDoc = querySnapshot.docs[0];
+        const userData = { id: userDoc.id, ...userDoc.data() };
+        
+        // Check Firestore PIN
+        if (userData.pin === password) {
+          setCurrentUser(userData);
+          setUserRole(userData.role);
+          return { success: true, user: userData };
         }
-      }, 800); // simulate network delay
-    });
+      }
+      
+      // Fallback to local users array if Firestore fails or user isn't found in DB (for demo purposes)
+      const fallbackUser = users.find(u => u.email === email && u.password === password);
+      if (fallbackUser) {
+        setCurrentUser(fallbackUser);
+        setUserRole(fallbackUser.role);
+        return { success: true, user: fallbackUser };
+      }
+
+      return { success: false, error: 'الرمز السري غير صحيح.' };
+    } catch (error) {
+      console.error("Login error:", error);
+      // Fallback
+      const fallbackUser = users.find(u => u.email === email && u.password === password);
+      if (fallbackUser) {
+        setCurrentUser(fallbackUser);
+        setUserRole(fallbackUser.role);
+        return { success: true, user: fallbackUser };
+      }
+      return { success: false, error: 'حدث خطأ أثناء تسجيل الدخول.' };
+    }
   };
 
   const logout = async () => {
@@ -65,7 +93,10 @@ export const AuthProvider = ({ children }) => {
     login,
     logout,
     switchDemoRole,
-    allUsers: users // Just for data context to access reps initially
+    allUsers: users,
+    isLoginModalOpen,
+    openLoginModal,
+    closeLoginModal
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

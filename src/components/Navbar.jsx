@@ -4,15 +4,14 @@ import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 import { 
   Building2, ShoppingCart, LogOut, LayoutDashboard, 
-  Package, Users, Store, ArrowLeftRight, Layers, Receipt, Shield, Moon, Sun, Menu, X
+  Package, Users, Store, ArrowLeftRight, Layers, Receipt, Shield, Moon, Sun, Menu, X, Key, XCircle
 } from 'lucide-react';
 
 const Navbar = ({ cartCount = 0 }) => {
-  const { currentUser, userRole, logout, switchDemoRole } = useAuth();
+  const { currentUser, userRole, logout, openLoginModal } = useAuth();
   const { isDarkMode, toggleTheme } = useTheme();
   const navigate = useNavigate();
   const location = useLocation();
-  const [showDemoRoleMenu, setShowDemoRoleMenu] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
   const isActivePath = (path) => location.pathname === path;
@@ -20,15 +19,6 @@ const Navbar = ({ cartCount = 0 }) => {
   const handleLogout = async () => {
     await logout();
     navigate('/');
-  };
-
-  const handleSwitchRole = (role) => {
-    switchDemoRole(role);
-    setShowDemoRoleMenu(false);
-    if (role === 'admin') navigate('/admin');
-    else if (role === 'sales_rep') navigate('/sales-rep');
-    else if (role === 'storekeeper') navigate('/storekeeper');
-    else navigate('/');
   };
 
   return (
@@ -155,44 +145,6 @@ const Navbar = ({ cartCount = 0 }) => {
             {isDarkMode ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
           </button>
 
-          {/* Quick Demo Role Switcher Dropdown (kept for ease of testing during dev) */}
-          <div className="relative">
-            <button
-              onClick={() => setShowDemoRoleMenu(!showDemoRoleMenu)}
-              className="flex items-center gap-2 px-3 py-1.5 bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold transition-all cursor-pointer"
-            >
-              <Shield className="w-3.5 h-3.5 text-indigo-500 dark:text-indigo-400" />
-              <span>
-                الدور: <strong className="font-bold">
-                  {userRole === 'admin' ? 'التاجر' : userRole === 'sales_rep' ? 'المندوب' : userRole === 'storekeeper' ? 'أمين المخزن' : 'الزبون'}
-                </strong>
-              </span>
-              <ArrowLeftRight className="w-3 h-3 text-slate-400" />
-            </button>
-
-            {showDemoRoleMenu && (
-              <div className="absolute left-0 mt-2 w-56 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xl p-2 z-50 animate-in fade-in zoom-in-95 duration-150">
-                <div className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider px-3 py-1.5">
-                  تغيير الدور (للتجربة)
-                </div>
-                <div className="space-y-1">
-                  <button onClick={() => handleSwitchRole('admin')} className={`w-full text-right px-3 py-2 rounded-xl text-xs font-medium flex items-center justify-between cursor-pointer ${userRole === 'admin' ? 'bg-indigo-600 text-white' : 'hover:bg-slate-100 dark:hover:bg-slate-800'}`}>
-                    <span>التاجر (الإدارة)</span>
-                  </button>
-                  <button onClick={() => handleSwitchRole('sales_rep')} className={`w-full text-right px-3 py-2 rounded-xl text-xs font-medium flex items-center justify-between cursor-pointer ${userRole === 'sales_rep' ? 'bg-indigo-600 text-white' : 'hover:bg-slate-100 dark:hover:bg-slate-800'}`}>
-                    <span>المندوب</span>
-                  </button>
-                  <button onClick={() => handleSwitchRole('storekeeper')} className={`w-full text-right px-3 py-2 rounded-xl text-xs font-medium flex items-center justify-between cursor-pointer ${userRole === 'storekeeper' ? 'bg-indigo-600 text-white' : 'hover:bg-slate-100 dark:hover:bg-slate-800'}`}>
-                    <span>أمين المخزن</span>
-                  </button>
-                  <button onClick={() => handleSwitchRole('customer')} className={`w-full text-right px-3 py-2 rounded-xl text-xs font-medium flex items-center justify-between cursor-pointer ${userRole === 'customer' ? 'bg-indigo-600 text-white' : 'hover:bg-slate-100 dark:hover:bg-slate-800'}`}>
-                    <span>الزبون (عام)</span>
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
-
           {/* User Status / Logout (NO login link for public customers!) */}
           {currentUser && (
             <div className="flex items-center gap-2">
@@ -219,16 +171,31 @@ const Navbar = ({ cartCount = 0 }) => {
         <div className="md:hidden border-t border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 absolute top-16 left-0 right-0 shadow-2xl animate-in slide-in-from-top-2 z-50">
           <nav className="flex flex-col p-4 gap-2">
             {userRole === 'customer' && (
-              <Link
-                to="/"
-                onClick={() => setIsMobileMenuOpen(false)}
-                className={`px-4 py-3 rounded-xl text-sm font-semibold flex items-center gap-3 transition-all ${
-                  isActivePath('/') ? 'bg-indigo-600 text-white' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800'
-                }`}
-              >
-                <Package className="w-5 h-5" />
-                <span>كتالوج المنتجات</span>
-              </Link>
+              <>
+                <Link
+                  to="/"
+                  onClick={() => setIsMobileMenuOpen(false)}
+                  className={`px-4 py-3 rounded-xl text-sm font-semibold flex items-center gap-3 transition-all ${
+                    isActivePath('/') ? 'bg-indigo-600 text-white' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800'
+                  }`}
+                >
+                  <Package className="w-5 h-5" />
+                  <span>كتالوج المنتجات</span>
+                </Link>
+                
+                <div className="flex-1 mt-4 border-t border-slate-200 dark:border-slate-800 pt-4">
+                  <button
+                    onClick={() => {
+                      setIsMobileMenuOpen(false);
+                      openLoginModal();
+                    }}
+                    className="w-full text-right px-4 py-3 rounded-xl text-sm font-semibold flex items-center gap-3 transition-all text-slate-500 hover:text-indigo-600 dark:text-slate-400 dark:hover:text-indigo-400 hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer"
+                  >
+                    <Shield className="w-5 h-5" />
+                    <span>بوابة الموظفين</span>
+                  </button>
+                </div>
+              </>
             )}
 
             {userRole === 'admin' && (

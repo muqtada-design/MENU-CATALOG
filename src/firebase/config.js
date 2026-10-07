@@ -1,31 +1,21 @@
-import { initializeApp } from 'firebase/app';
-import { getAuth } from 'firebase/auth';
-import { getFirestore } from 'firebase/firestore';
-import { getStorage } from 'firebase/storage';
+import { initializeApp } from "firebase/app";
+import { getAnalytics } from "firebase/analytics";
+import { getFirestore } from "firebase/firestore";
+import { getStorage } from "firebase/storage";
+import { getAuth } from "firebase/auth";
 
 const firebaseConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || "AIzaSyDemoKeyForB2BWholesalePOSApp",
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || "apex-wholesale-pos.firebaseapp.com",
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || "apex-wholesale-pos",
-  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || "apex-wholesale-pos.appspot.com",
-  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || "1234567890",
-  appId: import.meta.env.VITE_FIREBASE_APP_ID || "1:1234567890:web:abcdef123456"
+  apiKey: "AIzaSyDLwSajTdifqkP87UdGqBJZTZI9_ZuTKh8",
+  authDomain: "bradzhra-1a9b9.firebaseapp.com",
+  projectId: "bradzhra-1a9b9",
+  storageBucket: "bradzhra-1a9b9.firebasestorage.app",
+  messagingSenderId: "620533381158",
+  appId: "1:620533381158:web:b764a49041e2ac70cf4ee7",
+  measurementId: "G-Q54WRTE7EH"
 };
 
-let app, auth, db, storage;
-let isRealFirebaseConfigured = false;
-
-// Check if valid Firebase configuration is provided
-if (import.meta.env.VITE_FIREBASE_API_KEY && import.meta.env.VITE_FIREBASE_PROJECT_ID) {
-  try {
-    app = initializeApp(firebaseConfig);
-    auth = getAuth(app);
-    db = getFirestore(app);
-    storage = getStorage(app);
-    isRealFirebaseConfigured = true;
-  } catch (error) {
-    console.warn("Firebase initialization failed, operating in Mock/Demo mode:", error);
-  }
-}
-
-export { app, auth, db, storage, isRealFirebaseConfigured };
+const app = initializeApp(firebaseConfig);
+const analytics = typeof window !== 'undefined' ? getAnalytics(app) : null;
+export const db = getFirestore(app);
+export const storage = getStorage(app);
+export const auth = getAuth(app);

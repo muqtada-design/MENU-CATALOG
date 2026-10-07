@@ -5,18 +5,21 @@ import { AuthProvider } from './context/AuthContext'
 import { ThemeProvider } from './context/ThemeContext'
 import { DataProvider } from './context/DataContext'
 import App from './App.jsx'
+import ErrorBoundary from './components/ErrorBoundary'
 import './index.css'
 
 createRoot(document.getElementById('root')).render(
   <React.StrictMode>
-    <ThemeProvider>
-      <AuthProvider>
-        <DataProvider>
-          <BrowserRouter>
-            <App />
-          </BrowserRouter>
-        </DataProvider>
-      </AuthProvider>
-    </ThemeProvider>
+    <ErrorBoundary>
+      <ThemeProvider>
+        <AuthProvider>
+          <DataProvider>
+            <BrowserRouter>
+              <App />
+            </BrowserRouter>
+          </DataProvider>
+        </AuthProvider>
+      </ThemeProvider>
+    </ErrorBoundary>
   </React.StrictMode>
 )

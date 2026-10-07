@@ -8,7 +8,7 @@ const ProtectedRoute = ({ allowedRoles, children }) => {
   // If role is required and user is not logged in or role not allowed
   if (allowedRoles && !allowedRoles.includes(userRole)) {
     if (!currentUser) {
-      return <Navigate to="/system-login" replace />;
+      return <Navigate to="/login" replace />;
     }
     // Redirect to appropriate home page based on actual role
     switch (userRole) {

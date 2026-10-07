@@ -34,12 +34,14 @@ const AdminDashboard = () => {
   const [userName, setUserName] = useState('');
   const [userEmail, setUserEmail] = useState('');
   const [userRole, setUserRole] = useState('sales_rep');
+  const [userPin, setUserPin] = useState('');
 
   // --- Edit User Form State ---
   const [showEditUserModal, setShowEditUserModal] = useState(false);
   const [editUserId, setEditUserId] = useState(null);
   const [editUserName, setEditUserName] = useState('');
   const [editUserRole, setEditUserRole] = useState('');
+  const [editUserPin, setEditUserPin] = useState('');
 
   // --- Customer Creation Form State ---
   const [showAddCustModal, setShowAddCustModal] = useState(false);
@@ -86,32 +88,56 @@ const AdminDashboard = () => {
     setImagePreview('');
   };
 
-  const handleCreateUser = (e) => {
+  const handleCreateUser = async (e) => {
     e.preventDefault();
-    if (!userName || !userEmail) return;
-    addUser({ name: userName, email: userEmail, role: userRole });
+    if (!userName || !userEmail || !userPin) return;
+    const finalPin = userPin.padEnd(6, userPin.charAt(0) || '0');
+    
+    // Attempt Firestore write
+    try {
+      // Create a unique ID for the user Document
+      const newUserId = 'u' + Date.now();
+      const userRef = doc(db, 'users', newUserId);
+      await import('firebase/firestore').then(({ setDoc }) => 
+        setDoc(userRef, { name: userName, email: userEmail, role: userRole, pin: finalPin })
+      );
+      addUser({ id: newUserId, name: userName, email: userEmail, role: userRole, pin: finalPin });
+    } catch (error) {
+      console.warn("Firestore create skipped or failed:", error);
+      addUser({ name: userName, email: userEmail, role: userRole, pin: finalPin });
+    }
+    
     setShowAddUserModal(false);
     setUserName('');
     setUserEmail('');
+    setUserPin('');
   };
 
   const handleEditUserClick = (u) => {
     setEditUserId(u.id);
     setEditUserName(u.name);
     setEditUserRole(u.role);
+    setEditUserPin(u.pin || '');
     setShowEditUserModal(true);
   };
 
   const handleUpdateUserSubmit = async (e) => {
     e.preventDefault();
     if (!editUserName || !editUserRole || !editUserId) return;
+    
+    const finalPin = editUserPin ? editUserPin.padEnd(6, editUserPin.charAt(0) || '0') : '';
+
     try {
       const userRef = doc(db, 'users', editUserId);
-      await updateDoc(userRef, { name: editUserName, role: editUserRole });
+      const updates = { name: editUserName, role: editUserRole };
+      if (finalPin) updates.pin = finalPin;
+      await updateDoc(userRef, updates);
     } catch (error) {
       console.warn("Firestore update skipped or failed:", error);
     }
-    updateUser(editUserId, { name: editUserName, role: editUserRole });
+    const localUpdates = { name: editUserName, role: editUserRole };
+    if (finalPin) localUpdates.pin = finalPin;
+    updateUser(editUserId, localUpdates);
     setShowEditUserModal(false);
   };
 
@@ -691,6 +717,10 @@ const AdminDashboard = () => {
                   <option value="admin">مدير (تاجر)</option>
                 </select>
               </div>
+              <div>
+                <label className="text-xs font-bold text-slate-700 dark:text-slate-300 mb-1 block">الرمز السري للدخول (Login PIN) *</label>
+                <input type="password" inputMode="numeric" required maxLength="6" placeholder="مثال: 123456" value={userPin} onChange={(e) => setUserPin(e.target.value.replace(/\D/g, ''))} className="w-full p-2.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl text-xs focus:outline-none focus:border-indigo-500" dir="ltr" />
+              </div>
               <div className="flex justify-end gap-3 pt-4 border-t border-slate-200 dark:border-slate-800">
                 <button type="button" onClick={() => setShowAddUserModal(false)} className="px-4 py-2 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 rounded-xl text-xs font-semibold">إلغاء</button>
                 <button type="submit" className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-semibold">إضافة الموظف</button>
@@ -717,6 +747,10 @@ const AdminDashboard = () => {
                   <option value="storekeeper">أمين مخزن</option>
                   <option value="admin">مدير (تاجر)</option>
                 </select>
+              </div>
+              <div>
+                <label className="text-xs font-bold text-slate-700 dark:text-slate-300 mb-1 block">تغيير الرمز السري (Login PIN)</label>
+                <input type="password" inputMode="numeric" maxLength="6" placeholder="اتركه فارغاً لعدم التغيير" value={editUserPin} onChange={(e) => setEditUserPin(e.target.value.replace(/\D/g, ''))} className="w-full p-2.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl text-xs focus:outline-none focus:border-indigo-500" dir="ltr" />
               </div>
               <div className="flex justify-end gap-3 pt-4 border-t border-slate-200 dark:border-slate-800">
                 <button type="button" onClick={() => setShowEditUserModal(false)} className="px-4 py-2 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 rounded-xl text-xs font-semibold cursor-pointer">إلغاء</button>

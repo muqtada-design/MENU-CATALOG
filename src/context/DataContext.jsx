@@ -1,122 +1,147 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { useAuth } from './AuthContext';
+import { collection, onSnapshot, doc, setDoc, updateDoc, deleteDoc } from 'firebase/firestore';
+import { db } from '../firebase/config';
+import { useAuth } from './AuthContext'; // Used only for currentUser reference
 
 const DataContext = createContext();
 
 export const useData = () => useContext(DataContext);
 
 export const DataProvider = ({ children }) => {
-  const { allUsers, currentUser } = useAuth();
+  const { currentUser } = useAuth();
 
-  // --- Initial Mock Data (Translated to Arabic) ---
-  const [users, setUsers] = useState([
-    ...allUsers.filter(u => u.role !== 'customer').map(u => ({ ...u, isActive: true }))
-  ]);
-
-  const [products, setProducts] = useState([
-    { id: 'p1', name: 'شاشة سامسونج 55 بوصة', category: 'إلكترونيات', buyPrice: 300, sellPrice: 450, mainStock: 50, imageUrl: 'https://images.unsplash.com/photo-1593359677879-a4bb92f829d1?auto=format&fit=crop&q=80&w=400&h=300' },
-    { id: 'p2', name: 'لابتوب ديل انسبايرون', category: 'إلكترونيات', buyPrice: 500, sellPrice: 700, mainStock: 30, imageUrl: 'https://images.unsplash.com/photo-1496181133206-80ce9b88a853?auto=format&fit=crop&q=80&w=400&h=300' },
-    { id: 'p3', name: 'كرسي مكتب مريح', category: 'أثاث مكتبي', buyPrice: 80, sellPrice: 150, mainStock: 100, imageUrl: 'https://images.unsplash.com/photo-1505843490538-5133c6c7d0e1?auto=format&fit=crop&q=80&w=400&h=300' },
-    { id: 'p4', name: 'طابعة ليزر HP', category: 'معدات', buyPrice: 150, sellPrice: 250, mainStock: 40, imageUrl: 'https://images.unsplash.com/photo-1612815154858-60aa4c59eaa6?auto=format&fit=crop&q=80&w=400&h=300' },
-    { id: 'p5', name: 'هاتف آيفون 13 برو', category: 'إلكترونيات', buyPrice: 800, sellPrice: 1100, mainStock: 25, imageUrl: 'https://images.unsplash.com/photo-1510557880182-3d4d3cba35a5?auto=format&fit=crop&q=80&w=400&h=300' }
-  ]);
-
-  const [customers, setCustomers] = useState([
-    { id: 'c1', storeName: 'أسواق النور', ownerName: 'محمد عبدالله', phone: '+964 770 123 4567', address: 'بغداد, المنصور', balance: 150.50 },
-    { id: 'c2', storeName: 'مكتبة الفجر', ownerName: 'علي كمال', phone: '+964 780 987 6543', address: 'البصرة, العشار', balance: 0 },
-    { id: 'c3', storeName: 'شركة التقنية', ownerName: 'يوسف العلي', phone: '+964 750 555 1122', address: 'أربيل, عنكاوا', balance: 1200.00 }
-  ]);
-
-  // subInventories: { [repUserId]: [ { productId, qty } ] }
-  const [subInventories, setSubInventories] = useState({
-    'u2': [ { productId: 'p1', qty: 5 }, { productId: 'p3', qty: 20 } ], // سارة
-    'u3': [ { productId: 'p2', qty: 2 }, { productId: 'p4', qty: 10 } ]  // سامي
-  });
-
+  const [users, setUsers] = useState([]);
+  const [products, setProducts] = useState([]);
+  const [customers, setCustomers] = useState([]);
+  const [subInventories, setSubInventories] = useState({});
   const [inventoryLogs, setInventoryLogs] = useState([]);
   const [orders, setOrders] = useState([]);
 
+  // --- Real-time Listeners ---
+  useEffect(() => {
+    const unsubUsers = onSnapshot(collection(db, 'users'), snapshot => {
+      setUsers(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
+    }, err => console.error("Error fetching users:", err));
+
+    const unsubProducts = onSnapshot(collection(db, 'products'), snapshot => {
+      setProducts(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
+    }, err => console.error("Error fetching products:", err));
+
+    const unsubCustomers = onSnapshot(collection(db, 'customers'), snapshot => {
+      setCustomers(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
+    }, err => console.error("Error fetching customers:", err));
+
+    const unsubLogs = onSnapshot(collection(db, 'inventoryLogs'), snapshot => {
+      setInventoryLogs(snapshot.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => b.timestamp - a.timestamp));
+    }, err => console.error("Error fetching logs:", err));
+
+    const unsubOrders = onSnapshot(collection(db, 'orders'), snapshot => {
+      setOrders(snapshot.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => b.createdAt - a.createdAt));
+    }, err => console.error("Error fetching orders:", err));
+
+    const unsubSub = onSnapshot(collection(db, 'subInventories'), snapshot => {
+      const subs = {};
+      snapshot.docs.forEach(d => {
+        subs[d.id] = d.data().items || [];
+      });
+      setSubInventories(subs);
+    }, err => console.error("Error fetching subInventories:", err));
+
+    return () => {
+      unsubUsers(); unsubProducts(); unsubCustomers(); unsubLogs(); unsubOrders(); unsubSub();
+    };
+  }, []);
 
   // --- Helper Methods ---
-
   const generateId = (prefix) => `${prefix}${Date.now()}${Math.floor(Math.random() * 1000)}`;
 
-  // Product Management (Admin)
+  // Product Management
   const addProduct = async (productData, imageFile) => {
-    // In a real app, upload imageFile to Firebase Storage and get URL here.
-    // For now, we simulate a delay and use a placeholder or local URL if needed.
-    const fakeImageUrl = imageFile ? URL.createObjectURL(imageFile) : 'https://images.unsplash.com/photo-1505740420928-5e560c06d30e?auto=format&fit=crop&q=80&w=400&h=300';
-    
-    const newProduct = {
-      id: generateId('p'),
-      ...productData,
-      buyPrice: parseFloat(productData.buyPrice),
-      sellPrice: parseFloat(productData.sellPrice),
-      mainStock: parseInt(productData.mainStock),
-      imageUrl: fakeImageUrl
-    };
-    setProducts(prev => [...prev, newProduct]);
-    return { success: true, product: newProduct };
+    try {
+      const newId = generateId('p');
+      const fakeImageUrl = imageFile ? URL.createObjectURL(imageFile) : 'https://images.unsplash.com/photo-1505740420928-5e560c06d30e?auto=format&fit=crop&q=80&w=400&h=300';
+      
+      const newProduct = {
+        ...productData,
+        buyPrice: parseFloat(productData.buyPrice),
+        sellPrice: parseFloat(productData.sellPrice),
+        mainStock: parseInt(productData.mainStock),
+        imageUrl: fakeImageUrl
+      };
+      await setDoc(doc(db, 'products', newId), newProduct);
+      return { success: true };
+    } catch (error) {
+      console.error(error);
+      return { success: false, error: error.message };
+    }
   };
 
-  const updateProduct = (id, updates) => {
-    setProducts(prev => prev.map(p => p.id === id ? { ...p, ...updates } : p));
+  const updateProduct = async (id, updates) => {
+    await updateDoc(doc(db, 'products', id), updates);
   };
 
-  const deleteProduct = (id) => {
-    setProducts(prev => prev.filter(p => p.id !== id));
+  const deleteProduct = async (id) => {
+    await deleteDoc(doc(db, 'products', id));
   };
 
-  // User Management (Admin)
-  const addUser = (userData) => {
-    const newUser = { id: generateId('u'), ...userData, isActive: true };
-    setUsers(prev => [...prev, newUser]);
+  // User Management
+  const addUser = async (userData) => {
+    if (userData.id) {
+      await setDoc(doc(db, 'users', userData.id), { ...userData, isActive: true });
+    } else {
+      await setDoc(doc(db, 'users', generateId('u')), { ...userData, isActive: true });
+    }
   };
 
-  const toggleUserActive = (id) => {
-    setUsers(prev => prev.map(u => u.id === id ? { ...u, isActive: !u.isActive } : u));
+  const toggleUserActive = async (id) => {
+    const user = users.find(u => u.id === id);
+    if (user) {
+      await updateDoc(doc(db, 'users', id), { isActive: !user.isActive });
+    }
   };
 
-  const updateUser = (id, updates) => {
-    setUsers(prev => prev.map(u => u.id === id ? { ...u, ...updates } : u));
+  const updateUser = async (id, updates) => {
+    await updateDoc(doc(db, 'users', id), updates);
   };
 
-  const removeUser = (id) => {
-    setUsers(prev => prev.filter(u => u.id !== id));
+  const removeUser = async (id) => {
+    await deleteDoc(doc(db, 'users', id));
   };
 
   // Customer Management
-  const addCustomer = (custData) => {
-    setCustomers(prev => [...prev, { id: generateId('c'), ...custData }]);
+  const addCustomer = async (custData) => {
+    await setDoc(doc(db, 'customers', generateId('c')), custData);
   };
 
-  // Inventory Management (Storekeeper to Sales Rep)
-  const submitInventoryLoad = ({ repId, items }) => {
-    let hasError = false;
-    let errorMsg = '';
+  // Inventory Management
+  const submitInventoryLoad = async ({ repId, items }) => {
+    try {
+      let hasError = false;
+      let errorMsg = '';
 
-    // Validate stock
-    const updatedProducts = products.map(p => {
-      const loadItem = items.find(i => i.productId === p.id);
-      if (loadItem) {
-        if (p.mainStock < loadItem.qty) {
-          hasError = true;
-          errorMsg = `الكمية المطلوبة للمنتج ${p.name} تتجاوز رصيد المخزن الرئيسي.`;
+      const batchUpdates = [];
+
+      items.forEach(loadItem => {
+        const p = products.find(prod => prod.id === loadItem.productId);
+        if (p) {
+          if (p.mainStock < loadItem.qty) {
+            hasError = true;
+            errorMsg = `الكمية للمنتج ${p.name} تتجاوز الرصيد.`;
+          } else {
+            batchUpdates.push({ ref: doc(db, 'products', p.id), data: { mainStock: p.mainStock - loadItem.qty } });
+          }
         }
-        return { ...p, mainStock: p.mainStock - loadItem.qty };
+      });
+
+      if (hasError) return { success: false, error: errorMsg };
+
+      // Commit Product Stock Deduction
+      for (const update of batchUpdates) {
+        await updateDoc(update.ref, update.data);
       }
-      return p;
-    });
 
-    if (hasError) return { success: false, error: errorMsg };
-
-    // Update Main Stock
-    setProducts(updatedProducts);
-
-    // Update Rep's Sub-inventory
-    setSubInventories(prev => {
-      const repStock = [...(prev[repId] || [])];
-      
+      // Update Rep Sub-inventory
+      const repStock = subInventories[repId] ? [...subInventories[repId]] : [];
       items.forEach(item => {
         const existing = repStock.find(r => r.productId === item.productId);
         if (existing) {
@@ -125,123 +150,110 @@ export const DataProvider = ({ children }) => {
           repStock.push({ productId: item.productId, qty: item.qty });
         }
       });
+      await setDoc(doc(db, 'subInventories', repId), { items: repStock });
 
-      return { ...prev, [repId]: repStock };
-    });
+      // Log Transaction
+      const targetRep = users.find(u => u.id === repId);
+      const logEntry = {
+        type: 'load',
+        timestamp: Date.now(),
+        handledBy: currentUser?.id || 'unknown',
+        handledByName: currentUser?.name || 'مجهول',
+        targetRepId: repId,
+        targetRepName: targetRep?.name || 'مجهول',
+        items: items.map(i => ({ ...i, name: products.find(p => p.id === i.productId)?.name || 'غير معروف' }))
+      };
+      await setDoc(doc(db, 'inventoryLogs', generateId('log')), logEntry);
 
-    // Log the transaction
-    const targetRep = users.find(u => u.id === repId);
-    const logEntry = {
-      id: generateId('log'),
-      type: 'load',
-      timestamp: Date.now(),
-      handledBy: currentUser?.id || 'unknown',
-      handledByName: currentUser?.name || 'مخول مجهول',
-      targetRepId: repId,
-      targetRepName: targetRep?.name || 'مندوب مجهول',
-      items: items.map(i => ({
-        ...i,
-        name: products.find(p => p.id === i.productId)?.name || 'غير معروف'
-      }))
-    };
-    setInventoryLogs(prev => [logEntry, ...prev]);
-
-    return { success: true };
+      return { success: true };
+    } catch (error) {
+      console.error(error);
+      return { success: false, error: error.message };
+    }
   };
 
-  // POS Order Processing (Sales Rep & Storekeeper)
-  const createPOSOrder = ({ sellerUser, customer, cartItems, paidAmount }) => {
-    const totalAmount = cartItems.reduce((sum, item) => sum + (item.price * item.qty), 0);
-    const previousDebt = customer.balance || 0;
-    const grandTotal = totalAmount + previousDebt;
-    
-    const numPaid = parseFloat(paidAmount) || 0;
-    const remainingDebt = Math.max(0, grandTotal - numPaid);
+  // POS Order
+  const createPOSOrder = async ({ sellerUser, customer, cartItems, paidAmount }) => {
+    try {
+      const totalAmount = cartItems.reduce((sum, item) => sum + (item.price * item.qty), 0);
+      const previousDebt = customer.balance || 0;
+      const grandTotal = totalAmount + previousDebt;
+      
+      const numPaid = parseFloat(paidAmount) || 0;
+      const remainingDebt = Math.max(0, grandTotal - numPaid);
 
-    // 1. Deduct Stock
-    if (sellerUser.role === 'sales_rep') {
-      // Deduct from sub-inventory
-      setSubInventories(prev => {
-        const repStock = prev[sellerUser.id] ? [...prev[sellerUser.id]] : [];
+      // 1. Deduct Stock
+      if (sellerUser.role === 'sales_rep') {
+        const repStock = subInventories[sellerUser.id] ? [...subInventories[sellerUser.id]] : [];
         cartItems.forEach(cartItem => {
           const invItem = repStock.find(r => r.productId === cartItem.product.id);
-          if (invItem) {
-            invItem.qty -= cartItem.qty;
-          }
+          if (invItem) invItem.qty -= cartItem.qty;
         });
-        return { ...prev, [sellerUser.id]: repStock };
-      });
-    } else {
-      // Storekeeper selling directly -> Deduct from mainStock
-      setProducts(prev => prev.map(p => {
-        const cartItem = cartItems.find(c => c.product.id === p.id);
-        if (cartItem) {
-          return { ...p, mainStock: p.mainStock - cartItem.qty };
+        await setDoc(doc(db, 'subInventories', sellerUser.id), { items: repStock });
+      } else {
+        for (const cartItem of cartItems) {
+          const p = products.find(prod => prod.id === cartItem.product.id);
+          if (p) {
+            await updateDoc(doc(db, 'products', p.id), { mainStock: p.mainStock - cartItem.qty });
+          }
         }
-        return p;
-      }));
-      // Also log as direct sale in inventory logs
-      const logEntry = {
-        id: generateId('log_sale'),
-        type: 'direct_sale',
-        timestamp: Date.now(),
-        handledBy: sellerUser.id,
-        handledByName: sellerUser.name,
-        items: cartItems.map(c => ({ productId: c.product.id, name: c.product.name, qty: c.qty }))
+        const logEntry = {
+          type: 'direct_sale',
+          timestamp: Date.now(),
+          handledBy: sellerUser.id,
+          handledByName: sellerUser.name,
+          items: cartItems.map(c => ({ productId: c.product.id, name: c.product.name, qty: c.qty }))
+        };
+        await setDoc(doc(db, 'inventoryLogs', generateId('log_sale')), logEntry);
+      }
+
+      // 2. Update Customer Debt
+      await updateDoc(doc(db, 'customers', customer.id), { balance: remainingDebt });
+
+      // 3. Create Order
+      const newOrder = {
+        createdAt: Date.now(),
+        createdBy: sellerUser.id,
+        createdByName: sellerUser.name,
+        sellerRole: sellerUser.role,
+        customerId: customer.id,
+        customerName: customer.storeName,
+        customerOwner: customer.ownerName,
+        customerPhone: customer.phone,
+        items: cartItems.map(c => ({
+          productId: c.product.id,
+          name: c.product.name,
+          price: c.price,
+          buyPrice: c.product.buyPrice,
+          qty: c.qty
+        })),
+        totalAmount,
+        previousDebt,
+        grandTotal,
+        paidAmount: numPaid,
+        remainingDebt
       };
-      setInventoryLogs(prev => [logEntry, ...prev]);
+      
+      const newOrderRef = doc(db, 'orders', generateId('ord'));
+      await setDoc(newOrderRef, newOrder);
+
+      return { success: true, order: { id: newOrderRef.id, ...newOrder } };
+    } catch (error) {
+      console.error(error);
+      return { success: false, error: error.message };
     }
-
-    // 2. Update Customer Debt
-    setCustomers(prev => prev.map(c => 
-      c.id === customer.id ? { ...c, balance: remainingDebt } : c
-    ));
-
-    // 3. Create Order Record
-    const newOrder = {
-      id: generateId('ord'),
-      createdAt: Date.now(),
-      createdBy: sellerUser.id,
-      createdByName: sellerUser.name,
-      sellerRole: sellerUser.role,
-      customerId: customer.id,
-      customerName: customer.storeName,
-      customerOwner: customer.ownerName,
-      customerPhone: customer.phone,
-      items: cartItems.map(c => ({
-        productId: c.product.id,
-        name: c.product.name,
-        price: c.price,
-        buyPrice: c.product.buyPrice, // used for profit calculation
-        qty: c.qty
-      })),
-      totalAmount,
-      previousDebt,
-      grandTotal,
-      paidAmount: numPaid,
-      remainingDebt
-    };
-    
-    setOrders(prev => [newOrder, ...prev]);
-
-    return { success: true, order: newOrder };
   };
 
-  // Customer Self-Service Ordering
-  const submitCustomerOrder = ({ customerInfo, selectedRepId, cartItems }) => {
-    // Check if customer exists by phone, if not, create one
+  const submitCustomerOrder = async ({ customerInfo, selectedRepId, cartItems }) => {
     let targetCustomer = customers.find(c => c.phone === customerInfo.phone);
     if (!targetCustomer) {
-      targetCustomer = {
-        id: generateId('c'),
-        ...customerInfo,
-        balance: 0
-      };
-      setCustomers(prev => [...prev, targetCustomer]);
+      targetCustomer = { ...customerInfo, balance: 0 };
+      const newCustId = generateId('c');
+      await setDoc(doc(db, 'customers', newCustId), targetCustomer);
+      targetCustomer.id = newCustId;
     } else {
-      // Update existing customer info just in case
+      await updateDoc(doc(db, 'customers', targetCustomer.id), customerInfo);
       targetCustomer = { ...targetCustomer, ...customerInfo };
-      setCustomers(prev => prev.map(c => c.id === targetCustomer.id ? targetCustomer : c));
     }
 
     const sellerInfo = {
@@ -250,32 +262,20 @@ export const DataProvider = ({ children }) => {
       role: 'sales_rep'
     };
 
-    // Note: In a real system, this might be saved as a "Pending Order" for the rep to approve.
-    // For this prototype, we process it as a direct POS sale automatically.
     return createPOSOrder({
       sellerUser: sellerInfo,
       customer: targetCustomer,
       cartItems: cartItems.map(item => ({ ...item, price: item.product.sellPrice })),
-      paidAmount: 0 // They just ordered, haven't paid yet
+      paidAmount: 0
     });
   };
 
-  // Financial Stats for Admin
   const getFinancialStats = () => {
     const totalSales = orders.reduce((sum, o) => sum + o.totalAmount, 0);
-    
-    const totalProfit = orders.reduce((sum, o) => {
-      const orderProfit = o.items.reduce((itemSum, item) => {
-        return itemSum + ((item.price - item.buyPrice) * item.qty);
-      }, 0);
-      return sum + orderProfit;
-    }, 0);
-
+    const totalProfit = orders.reduce((sum, o) => sum + o.items.reduce((itemSum, item) => itemSum + ((item.price - item.buyPrice) * item.qty), 0), 0);
     const totalCustomerDebts = customers.reduce((sum, c) => sum + (c.balance || 0), 0);
-
     return { totalSales, totalProfit, totalCustomerDebts };
   };
-
 
   const value = {
     users, addUser, updateUser, removeUser, toggleUserActive,

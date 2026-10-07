@@ -2,9 +2,9 @@ import React from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import ProtectedRoute from './components/ProtectedRoute';
 import Navbar from './components/Navbar';
+import LoginModal from './components/LoginModal';
 
 import PublicCatalogPage from './pages/PublicCatalogPage';
-import SystemLogin from './pages/SystemLogin';
 import AdminDashboard from './pages/AdminDashboard';
 import SalesRepDashboard from './pages/SalesRepDashboard';
 import StorekeeperDashboard from './pages/StorekeeperDashboard';
@@ -19,9 +19,6 @@ function App() {
                   {/* 1. Customer (Public) Catalog */}
                   <Route path="/" element={<PublicCatalogPage />} />
                   
-                  {/* SECRET LOGIN ROUTE */}
-                  <Route path="/system-login" element={<SystemLogin />} />
-
                   {/* 2. Admin (Owner) Dashboard */}
                   <Route 
                     path="/admin" 
@@ -66,6 +63,9 @@ function App() {
                   <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>
+      
+      {/* Global Staff Lock Modal */}
+      <LoginModal />
     </div>
   );
 }

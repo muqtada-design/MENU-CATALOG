@@ -1,12 +1,17 @@
 import React, { useState, useMemo } from 'react';
+import { Link } from 'react-router-dom';
 import { useData } from '../context/DataContext';
+import { useAuth } from '../context/AuthContext';
 import { 
   ShoppingCart, Search, UserCheck, Store, Phone, MapPin, 
-  CheckCircle2, Plus, Minus, Trash2, ArrowRight, Package, AlertCircle 
+  CheckCircle2, Plus, Minus, Trash2, ArrowRight, Package, AlertCircle, Shield
 } from 'lucide-react';
+import { doc, setDoc } from 'firebase/firestore';
+import { db } from '../firebase/config';
 
 const PublicCatalogPage = () => {
   const { products, users, submitCustomerOrder } = useData();
+  const { openLoginModal } = useAuth();
 
   // Search & Filter State
   const [searchQuery, setSearchQuery] = useState('');
@@ -27,6 +32,7 @@ const PublicCatalogPage = () => {
   const [orderSuccessMsg, setOrderSuccessMsg] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
   const [toastMsg, setToastMsg] = useState('');
+  const [isInitializing, setIsInitializing] = useState(false);
 
   // Filter Sales Reps from Users list
   const salesReps = useMemo(() => {
@@ -129,6 +135,73 @@ const PublicCatalogPage = () => {
     }
   };
 
+  // Initialize DB Handler
+  const handleInitializeDB = async () => {
+    setIsInitializing(true);
+    try {
+      // 1. Create Admin
+      await setDoc(doc(db, 'users', 'admin_init'), {
+        name: 'المدير العام',
+        role: 'التاجر',
+        pin: '0000',
+        isActive: true
+      });
+
+      // 2. Sample Products
+      const sampleProducts = [
+        {
+          name: 'كرتونة مياه معدنية 330 مل',
+          category: 'مشروبات',
+          buyPrice: 10,
+          sellPrice: 15,
+          mainStock: 100,
+          unit: 'كرتونة',
+          imageUrl: 'https://images.unsplash.com/photo-1548839140-29a749e1bc4e?auto=format&fit=crop&q=80&w=400&h=300'
+        },
+        {
+          name: 'أرز بسمتي 10 كيلو',
+          category: 'مواد غذائية',
+          buyPrice: 40,
+          sellPrice: 55,
+          mainStock: 50,
+          unit: 'كيس',
+          imageUrl: 'https://images.unsplash.com/photo-1586201375761-83865001e8ac?auto=format&fit=crop&q=80&w=400&h=300'
+        },
+        {
+          name: 'زيت زيتون بكر ممتاز 5 لتر',
+          category: 'مواد غذائية',
+          buyPrice: 120,
+          sellPrice: 150,
+          mainStock: 30,
+          unit: 'تنكة',
+          imageUrl: 'https://images.unsplash.com/photo-1474979266404-7eaacbcd87c5?auto=format&fit=crop&q=80&w=400&h=300'
+        },
+        {
+          name: 'مناديل ورقية 100 عبوة',
+          category: 'منظفات ورقيات',
+          buyPrice: 80,
+          sellPrice: 110,
+          mainStock: 200,
+          unit: 'كرتونة',
+          imageUrl: 'https://images.unsplash.com/photo-1584556812952-905ffd0c611a?auto=format&fit=crop&q=80&w=400&h=300'
+        }
+      ];
+
+      for (let i = 0; i < sampleProducts.length; i++) {
+        await setDoc(doc(db, 'products', `p_init_${i}`), sampleProducts[i]);
+      }
+
+      setToastMsg('تمت تهيئة قاعدة البيانات بنجاح');
+      setTimeout(() => setToastMsg(''), 3000);
+    } catch (error) {
+      console.error("Initialization error", error);
+      alert('حدث خطأ أثناء التهيئة: ' + error.message);
+      setErrorMsg('حدث خطأ أثناء التهيئة: ' + error.message);
+    } finally {
+      setIsInitializing(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 pb-16 transition-colors">
       
@@ -158,6 +231,27 @@ const PublicCatalogPage = () => {
               <span>{orderSuccessMsg}</span>
             </div>
             <button onClick={() => setOrderSuccessMsg('')} className="font-bold text-xs">إخفاء</button>
+          </div>
+        )}
+
+        {/* Initialize DB Button if Empty */}
+        {products.length === 0 && (
+          <div className="mb-8 bg-indigo-50 dark:bg-indigo-950/30 border border-indigo-200 dark:border-indigo-800 rounded-2xl p-6 flex flex-col items-center justify-center text-center shadow-lg animate-in fade-in zoom-in duration-300">
+            <div className="w-16 h-16 bg-indigo-100 dark:bg-indigo-900 rounded-full flex items-center justify-center mb-4 text-indigo-600 dark:text-indigo-400">
+              <Package className="w-8 h-8" />
+            </div>
+            <h3 className="text-xl font-bold text-slate-800 dark:text-slate-200 mb-2">قاعدة البيانات فارغة</h3>
+            <p className="text-slate-600 dark:text-slate-400 text-sm max-w-md mb-6">
+              يبدو أن النظام جديد ولا توجد منتجات أو مستخدمين حتى الآن. قم بتهيئة النظام لإنشاء حساب التاجر الافتراضي ومجموعة من المنتجات التجريبية.
+            </p>
+            <button
+              onClick={handleInitializeDB}
+              disabled={isInitializing}
+              className="px-6 py-3 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white rounded-xl text-sm font-bold shadow-lg shadow-indigo-600/30 transition-all cursor-pointer flex items-center gap-2 disabled:opacity-50"
+            >
+              <Plus className="w-5 h-5" />
+              {isInitializing ? 'جاري التهيئة...' : 'تهيئة النظام (Initialize Database)'}
+            </button>
           </div>
         )}
 
@@ -431,6 +525,16 @@ const PublicCatalogPage = () => {
         </div>
       )}
 
+      {/* Footer / Staff Portal Link */}
+      <footer className="mt-16 py-6 border-t border-slate-200 dark:border-slate-800 text-center">
+        <button 
+          onClick={openLoginModal}
+          className="text-xs text-slate-400 dark:text-slate-500 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors inline-flex items-center gap-1.5 cursor-pointer font-semibold"
+        >
+          <Shield className="w-3.5 h-3.5" />
+          <span>بوابة الموظفين</span>
+        </button>
+      </footer>
     </div>
   );
 };
