@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { collection, onSnapshot, doc, setDoc, updateDoc, deleteDoc, writeBatch } from 'firebase/firestore';
+import { collection, onSnapshot, doc, setDoc, updateDoc, deleteDoc, writeBatch, addDoc } from 'firebase/firestore';
 import { db } from '../firebase/config';
 import { useAuth } from './AuthContext';
 import { DEFAULT_USERS, DEFAULT_PRODUCTS, FALLBACK_PRODUCT_IMAGE } from '../firebase/defaultData';
@@ -525,30 +525,121 @@ export const DataProvider = ({ children }) => {
     }
   };
 
-  const submitCustomerOrder = async ({ customerInfo, selectedRepId, cartItems }) => {
-    let targetCustomer = customers.find(c => c.phone === customerInfo.phone);
-    if (!targetCustomer) {
-      targetCustomer = { ...customerInfo, balance: 0 };
-      const newCustId = generateId('c');
-      await setDoc(doc(db, 'customers', newCustId), targetCustomer);
-      targetCustomer.id = newCustId;
-    } else {
-      await updateDoc(doc(db, 'customers', targetCustomer.id), customerInfo);
-      targetCustomer = { ...targetCustomer, ...customerInfo };
+  const submitCustomerOrder = async ({ customerInfo = {}, selectedRepId = '', cartItems = [] }) => {
+    try {
+      // Find assigned sales rep
+      const rep = users.find(u => u.id === selectedRepId) || {};
+      const repId = String(selectedRepId || rep.id || '').trim();
+      const repName = String(rep.name || 'مندوب مبيعات').trim();
+      const repEmail = String(rep.email || '').trim();
+
+      const shopName = String(customerInfo.storeName || customerInfo.shopName || '').trim();
+      const ownerName = String(customerInfo.ownerName || '').trim();
+      const phone = String(customerInfo.phone || '').trim();
+      const address = String(customerInfo.address || '').trim();
+
+      // Calculate total securely
+      const total = cartItems.reduce((sum, item) => {
+        const p = Number(item.price ?? item.product?.price ?? item.product?.sellPrice ?? 0);
+        const q = Number(item.qty ?? item.quantity ?? 1);
+        return sum + (p * q);
+      }, 0);
+
+      // Sanitize items array: absolutely NO field is undefined (Firestore rejects undefined)
+      const sanitizedItems = cartItems.map(item => {
+        const prod = item.product || {};
+        const itemId = String(prod.id || item.id || item.productId || generateId('item')).trim();
+        const itemName = String(prod.name || item.name || 'منتج').trim();
+        const itemPrice = Number(item.price ?? prod.price ?? prod.sellPrice ?? 0);
+        const itemQty = Number(item.qty ?? item.quantity ?? 1);
+        const itemUnit = String(prod.unit || item.unit || 'قطعة').trim();
+        const itemImage = String(prod.image || prod.imageUrl || item.image || item.imageUrl || FALLBACK_PRODUCT_IMAGE).trim();
+        const itemCost = Number(prod.costPrice ?? prod.buyPrice ?? item.costPrice ?? item.buyPrice ?? 0);
+
+        return {
+          id: itemId || null,
+          productId: itemId || null,
+          name: itemName || '',
+          price: itemPrice,
+          quantity: itemQty,
+          qty: itemQty,
+          unit: itemUnit || '',
+          image: itemImage || '',
+          imageUrl: itemImage || '',
+          costPrice: itemCost,
+          buyPrice: itemCost
+        };
+      });
+
+      // Sanitize entire order object: NO undefined values allowed
+      const orderData = {
+        repId: repId || null,
+        repName: repName || '',
+        repEmail: repEmail || '',
+        shopName: shopName || '',
+        customerName: shopName || '', // backwards compatibility
+        ownerName: ownerName || '',
+        customerOwner: ownerName || '', // backwards compatibility
+        phone: phone || '',
+        customerPhone: phone || '', // backwards compatibility
+        address: address || '',
+        status: 'pending', // "pending" (قيد الانتظار)
+        statusLabel: 'قيد الانتظار',
+        total: Number(total.toFixed(2)),
+        totalAmount: Number(total.toFixed(2)), // backwards compatibility
+        paidAmount: 0,
+        remainingDebt: Number(total.toFixed(2)),
+        items: sanitizedItems,
+        createdAt: Date.now(),
+        createdAtFormatted: new Date().toISOString(),
+        createdBy: repId || 'customer',
+        createdByName: repName || 'طلب جملة إلكتروني',
+        sellerRole: 'sales_rep',
+        type: 'wholesale_request'
+      };
+
+      // 1. Create clean order document in Firestore using addDoc
+      const orderDocRef = await addDoc(collection(db, 'orders'), orderData);
+
+      // 2. Safely create or update customer info without breaking the order if it fails
+      try {
+        if (phone) {
+          const existingCustomer = customers.find(c => c.phone === phone);
+          if (existingCustomer) {
+            await updateDoc(doc(db, 'customers', existingCustomer.id), {
+              storeName: shopName || existingCustomer.storeName || '',
+              ownerName: ownerName || existingCustomer.ownerName || '',
+              phone: phone || existingCustomer.phone || '',
+              address: address || existingCustomer.address || ''
+            });
+          } else {
+            const newCustId = generateId('c');
+            await setDoc(doc(db, 'customers', newCustId), {
+              id: newCustId,
+              storeName: shopName || '',
+              ownerName: ownerName || '',
+              phone: phone || '',
+              address: address || '',
+              balance: 0,
+              createdAt: Date.now()
+            }, { merge: true });
+          }
+        }
+      } catch (custError) {
+        console.warn("Non-critical: customer record sync skipped:", custError);
+      }
+
+      return { 
+        success: true, 
+        order: { id: orderDocRef.id, ...orderData } 
+      };
+    } catch (error) {
+      console.error("submitCustomerOrder error:", error);
+      return { 
+        success: false, 
+        error: error.message || 'حدث خطأ أثناء حفظ الطلب في قاعدة البيانات.' 
+      };
     }
-
-    const sellerInfo = {
-      id: selectedRepId,
-      name: users.find(u => u.id === selectedRepId)?.name || 'مندوب تلقائي',
-      role: 'sales_rep'
-    };
-
-    return createPOSOrder({
-      sellerUser: sellerInfo,
-      customer: targetCustomer,
-      cartItems: cartItems.map(item => ({ ...item, price: Number(item.product.price || item.product.sellPrice) })),
-      paidAmount: 0
-    });
   };
 
   const getFinancialStats = () => {

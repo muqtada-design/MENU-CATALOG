@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { useData } from '../context/DataContext';
 import { useAuth } from '../context/AuthContext';
@@ -34,11 +34,19 @@ const PublicCatalogPage = () => {
   const [errorMsg, setErrorMsg] = useState('');
   const [toastMsg, setToastMsg] = useState('');
   const [isInitializing, setIsInitializing] = useState(false);
+  const [isSubmittingOrder, setIsSubmittingOrder] = useState(false);
 
   // Filter Sales Reps from Users list
   const salesReps = useMemo(() => {
     return users.filter(u => u.role === 'sales_rep' && u.isActive);
   }, [users]);
+
+  // Ensure default sales rep is selected automatically when reps load or cart opens
+  useEffect(() => {
+    if (salesReps.length > 0 && (!selectedRepId || !salesReps.some(r => r.id === selectedRepId))) {
+      setSelectedRepId(salesReps[0].id);
+    }
+  }, [salesReps, selectedRepId, isCartOpen]);
 
   // Categories
   const categories = useMemo(() => {
@@ -99,7 +107,7 @@ const PublicCatalogPage = () => {
   };
 
   // Order Submission
-  const handleSubmitOrder = (e) => {
+  const handleSubmitOrder = async (e) => {
     e.preventDefault();
     setErrorMsg('');
     
@@ -107,7 +115,15 @@ const PublicCatalogPage = () => {
       setErrorMsg('قائمة المشتريات فارغة.');
       return;
     }
-    if (!selectedRepId) {
+
+    // Default to first available sales rep if none selected
+    let repIdToUse = selectedRepId;
+    if (!repIdToUse && salesReps.length > 0) {
+      repIdToUse = salesReps[0].id;
+      setSelectedRepId(repIdToUse);
+    }
+
+    if (!repIdToUse) {
       setErrorMsg('الرجاء اختيار المندوب الخاص بك من القائمة.');
       return;
     }
@@ -116,23 +132,35 @@ const PublicCatalogPage = () => {
       return;
     }
 
-    const res = submitCustomerOrder({
-      customerInfo: { storeName, ownerName, phone, address },
-      selectedRepId,
-      cartItems: cart
-    });
+    try {
+      setIsSubmittingOrder(true);
+      const res = await submitCustomerOrder({
+        customerInfo: { storeName, ownerName, phone, address },
+        selectedRepId: repIdToUse,
+        cartItems: cart
+      });
 
-    if (res.success) {
-      setOrderSuccessMsg(`تم إرسال الطلب بنجاح! رقم الطلب: ${res.order.id}. سيقوم المندوب بالتواصل معك قريباً.`);
-      setCart([]);
-      setIsCartOpen(false);
-      setStoreName('');
-      setOwnerName('');
-      setPhone('');
-      setAddress('');
-      setSelectedRepId('');
-    } else {
-      setErrorMsg('حدث خطأ أثناء إرسال الطلب.');
+      if (res && res.success) {
+        setOrderSuccessMsg(`تم إرسال الطلب بنجاح! رقم الطلب: ${res.order?.id || ''}. سيقوم المندوب بالتواصل معك قريباً.`);
+        setCart([]);
+        setIsCartOpen(false);
+        setStoreName('');
+        setOwnerName('');
+        setPhone('');
+        setAddress('');
+        if (salesReps.length > 0) {
+          setSelectedRepId(salesReps[0].id);
+        }
+      } else {
+        const errorDetail = res?.error ? `: ${res.error}` : '';
+        console.error("Order submission failed:", res?.error);
+        setErrorMsg(`حدث خطأ أثناء إرسال الطلب${errorDetail}`);
+      }
+    } catch (error) {
+      console.error("Order submission error:", error);
+      setErrorMsg(`حدث خطأ أثناء إرسال الطلب: ${error.message || error}`);
+    } finally {
+      setIsSubmittingOrder(false);
     }
   };
 
@@ -394,14 +422,17 @@ const PublicCatalogPage = () => {
                     value={selectedRepId}
                     onChange={(e) => setSelectedRepId(e.target.value)}
                     required
-                    className="w-full p-3 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl text-xs focus:outline-none focus:border-indigo-500 cursor-pointer"
+                    className="w-full p-3 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl text-xs focus:outline-none focus:border-indigo-500 cursor-pointer text-slate-900 dark:text-white"
                   >
-                    <option value="">-- اختر المندوب --</option>
-                    {salesReps.map(rep => (
-                      <option key={rep.id} value={rep.id}>
-                        {rep.name} ({rep.email})
-                      </option>
-                    ))}
+                    {salesReps.length === 0 ? (
+                      <option value="">لا يوجد مناديب متاحين حالياً</option>
+                    ) : (
+                      salesReps.map(rep => (
+                        <option key={rep.id} value={rep.id}>
+                          {rep.name} {rep.email ? `(${rep.email})` : ''}
+                        </option>
+                      ))
+                    )}
                   </select>
                 </div>
 
@@ -464,10 +495,14 @@ const PublicCatalogPage = () => {
                   </div>
                   <button
                     type="submit"
-                    disabled={cart.length === 0}
-                    className="w-full py-3 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white font-bold rounded-xl text-xs shadow-lg shadow-indigo-600/30 transition-all cursor-pointer disabled:opacity-50"
+                    disabled={cart.length === 0 || isSubmittingOrder}
+                    className="w-full py-3 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white font-bold rounded-xl text-xs shadow-lg shadow-indigo-600/30 transition-all cursor-pointer disabled:opacity-50 flex items-center justify-center gap-2"
                   >
-                    إرسال الطلب إلى المندوب
+                    {isSubmittingOrder ? (
+                      <span>جاري إرسال الطلب إلى المندوب...</span>
+                    ) : (
+                      <span>إرسال الطلب إلى المندوب</span>
+                    )}
                   </button>
                 </div>
               </form>
