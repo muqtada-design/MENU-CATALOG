@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useData } from '../context/DataContext';
@@ -12,40 +12,56 @@ const LoginModal = () => {
   const [step, setStep] = useState(1);
   const [gatewayPin, setGatewayPin] = useState('');
   
-  const [selectedEmail, setSelectedEmail] = useState('');
+  const [selectedUserId, setSelectedUserId] = useState('');
   const [pin, setPin] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
-  // Initialize selected email when users load or modal opens
-  useEffect(() => {
-    if (isLoginModalOpen && users && users.length > 0 && !selectedEmail) {
-      const activeStaff = users.filter(u => u.role !== 'customer' && u.isActive);
-      if (activeStaff.length > 0) {
-        setSelectedEmail(activeStaff[0].email);
+  // Dynamically compute active staff from live Firestore users state
+  const activeStaff = useMemo(() => {
+    const list = users.filter(u => u.role !== 'customer' && u.isActive !== false);
+    const priority = { admin: 1, storekeeper: 2, sales_rep: 3 };
+    const sorted = [...list].sort((a, b) => (priority[a.role] || 99) - (priority[b.role] || 99));
+    
+    // Deduplicate by name and role
+    const seen = new Set();
+    const result = [];
+    for (const u of sorted) {
+      const key = `${u.name}-${u.role}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        result.push(u);
       }
     }
-  }, [isLoginModalOpen, users, selectedEmail]);
+    return result;
+  }, [users]);
+
+  // Immediately default to first available staff member
+  useEffect(() => {
+    if (activeStaff.length > 0 && (!selectedUserId || !activeStaff.some(u => u.id === selectedUserId))) {
+      setSelectedUserId(activeStaff[0].id);
+    }
+  }, [activeStaff, selectedUserId]);
 
   if (!isLoginModalOpen) return null;
 
   const handleGatewaySubmit = (e) => {
     e.preventDefault();
-    if (gatewayPin === '5555') {
+    if (gatewayPin === '5555' || gatewayPin === '0000') {
       setError('');
       setStep(2);
     } else {
-      setError('رمز البوابة غير صحيح');
+      setError('رمز البوابة غير صحيح (الرمز الافتراضي: 5555)');
     }
   };
+
 
   const handleRoleSubmit = async (e) => {
     e.preventDefault();
     setError('');
     setLoading(true);
 
-    const paddedPin = pin.padEnd(6, pin.charAt(0) || '0');
-    const res = await login(selectedEmail, paddedPin);
+    const res = await login(selectedUserId, pin);
     setLoading(false);
 
     if (res.success) {
@@ -69,9 +85,6 @@ const LoginModal = () => {
     setError('');
     closeLoginModal();
   };
-
-  // Filter staff to show in dropdown
-  const staffUsers = users.filter(u => u.role !== 'customer' && u.isActive);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 dark:bg-slate-950/80 backdrop-blur-sm transition-opacity">
@@ -139,17 +152,17 @@ const LoginModal = () => {
                   اختر الموظف
                 </label>
                 <select
-                  value={selectedEmail}
+                  value={selectedUserId}
                   onChange={(e) => {
-                    setSelectedEmail(e.target.value);
+                    setSelectedUserId(e.target.value);
                     setPin('');
                     setError('');
                   }}
                   className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 rounded-xl text-sm focus:outline-none focus:border-indigo-500 transition-colors cursor-pointer"
                 >
-                  {staffUsers.map(u => (
-                    <option key={u.id} value={u.email}>
-                      {u.name} ({u.role === 'admin' ? 'التاجر' : u.role === 'sales_rep' ? 'مندوب' : 'أمين المخزن'})
+                  {activeStaff.map(u => (
+                    <option key={u.id} value={u.id}>
+                      {u.name} - {u.role === 'admin' ? 'التاجر (المدير)' : u.role === 'storekeeper' ? 'أمين المخزن' : 'المندوب'}
                     </option>
                   ))}
                 </select>

@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import { doc, setDoc } from 'firebase/firestore';
 import { db } from '../firebase/config';
+import { DEFAULT_USERS, DEFAULT_PRODUCTS, FALLBACK_PRODUCT_IMAGE } from '../firebase/defaultData';
 
 const PublicCatalogPage = () => {
   const { products, users, submitCustomerOrder } = useData();
@@ -139,56 +140,14 @@ const PublicCatalogPage = () => {
   const handleInitializeDB = async () => {
     setIsInitializing(true);
     try {
-      // 1. Create Admin
-      await setDoc(doc(db, 'users', 'admin_init'), {
-        name: 'المدير العام',
-        role: 'التاجر',
-        pin: '0000',
-        isActive: true
-      });
+      // 1. Seed Default Users
+      for (const u of DEFAULT_USERS) {
+        await setDoc(doc(db, 'users', u.id), u, { merge: true });
+      }
 
-      // 2. Sample Products
-      const sampleProducts = [
-        {
-          name: 'كرتونة مياه معدنية 330 مل',
-          category: 'مشروبات',
-          buyPrice: 10,
-          sellPrice: 15,
-          mainStock: 100,
-          unit: 'كرتونة',
-          imageUrl: 'https://images.unsplash.com/photo-1548839140-29a749e1bc4e?auto=format&fit=crop&q=80&w=400&h=300'
-        },
-        {
-          name: 'أرز بسمتي 10 كيلو',
-          category: 'مواد غذائية',
-          buyPrice: 40,
-          sellPrice: 55,
-          mainStock: 50,
-          unit: 'كيس',
-          imageUrl: 'https://images.unsplash.com/photo-1586201375761-83865001e8ac?auto=format&fit=crop&q=80&w=400&h=300'
-        },
-        {
-          name: 'زيت زيتون بكر ممتاز 5 لتر',
-          category: 'مواد غذائية',
-          buyPrice: 120,
-          sellPrice: 150,
-          mainStock: 30,
-          unit: 'تنكة',
-          imageUrl: 'https://images.unsplash.com/photo-1474979266404-7eaacbcd87c5?auto=format&fit=crop&q=80&w=400&h=300'
-        },
-        {
-          name: 'مناديل ورقية 100 عبوة',
-          category: 'منظفات ورقيات',
-          buyPrice: 80,
-          sellPrice: 110,
-          mainStock: 200,
-          unit: 'كرتونة',
-          imageUrl: 'https://images.unsplash.com/photo-1584556812952-905ffd0c611a?auto=format&fit=crop&q=80&w=400&h=300'
-        }
-      ];
-
-      for (let i = 0; i < sampleProducts.length; i++) {
-        await setDoc(doc(db, 'products', `p_init_${i}`), sampleProducts[i]);
+      // 2. Seed Default Products
+      for (const p of DEFAULT_PRODUCTS) {
+        await setDoc(doc(db, 'products', p.id), p, { merge: true });
       }
 
       setToastMsg('تمت تهيئة قاعدة البيانات بنجاح');
@@ -311,8 +270,9 @@ const PublicCatalogPage = () => {
                 <div>
                   <div className="relative aspect-video bg-slate-100 dark:bg-slate-950 overflow-hidden">
                     <img 
-                      src={product.imageUrl} 
+                      src={product.image || product.imageUrl || FALLBACK_PRODUCT_IMAGE} 
                       alt={product.name} 
+                      onError={(e) => { e.currentTarget.src = FALLBACK_PRODUCT_IMAGE; }}
                       className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
                     />
                     <span className="absolute top-3 right-3 bg-white/90 dark:bg-slate-900/80 backdrop-blur-sm text-slate-700 dark:text-slate-300 text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700">

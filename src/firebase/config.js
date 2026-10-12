@@ -1,5 +1,5 @@
-import { initializeApp } from "firebase/app";
-import { getAnalytics } from "firebase/analytics";
+import { initializeApp, getApps, getApp } from "firebase/app";
+import { getAnalytics, isSupported } from "firebase/analytics";
 import { getFirestore } from "firebase/firestore";
 import { getStorage } from "firebase/storage";
 import { getAuth } from "firebase/auth";
@@ -14,8 +14,30 @@ const firebaseConfig = {
   measurementId: "G-Q54WRTE7EH"
 };
 
-const app = initializeApp(firebaseConfig);
-const analytics = typeof window !== 'undefined' ? getAnalytics(app) : null;
+// Prevent re-initialization if already initialized
+const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
+
+// Initialize analytics safely without throwing in restricted/production environments
+let analytics = null;
+if (typeof window !== "undefined") {
+  isSupported()
+    .then((supported) => {
+      if (supported) {
+        try {
+          analytics = getAnalytics(app);
+        } catch (err) {
+          console.warn("Firebase Analytics initialization caught error:", err);
+        }
+      }
+    })
+    .catch((err) => {
+      console.warn("Firebase Analytics not supported in this environment:", err);
+    });
+}
+
 export const db = getFirestore(app);
 export const storage = getStorage(app);
 export const auth = getAuth(app);
+export { app, analytics };
+export default app;
+

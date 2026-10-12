@@ -1,6 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useData } from '../context/DataContext';
-import { Package, ArrowRightLeft, Search, Plus, Minus, UserCheck, CheckCircle2 } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { Package, ArrowRightLeft, Search, Plus, Minus, UserCheck, CheckCircle2, AlertCircle, Layers, ShoppingCart } from 'lucide-react';
+import { FALLBACK_PRODUCT_IMAGE } from '../firebase/defaultData';
 
 const StorekeeperDashboard = () => {
   const { products, users, submitInventoryLoad } = useData();
@@ -10,14 +12,23 @@ const StorekeeperDashboard = () => {
   const [loadItems, setLoadItems] = useState({}); // { productId: qty }
   const [searchQuery, setSearchQuery] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
+  const [errorMsg, setErrorMsg] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
   
   // Filter active sales reps
   const salesReps = users.filter(u => u.role === 'sales_rep' && u.isActive);
 
+  // Automatically default to first available sales rep on load so selectedRepId is never undefined or empty
+  useEffect(() => {
+    if (salesReps.length > 0 && (!selectedRepId || !salesReps.some(r => r.id === selectedRepId))) {
+      setSelectedRepId(salesReps[0].id);
+    }
+  }, [salesReps, selectedRepId]);
+
   // Filter products
   const filteredProducts = products.filter(p => 
     p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    p.category.toLowerCase().includes(searchQuery.toLowerCase())
+    (p.category && p.category.toLowerCase().includes(searchQuery.toLowerCase()))
   );
 
   const handleQtyChange = (productId, delta, maxStock) => {
@@ -33,33 +44,46 @@ const StorekeeperDashboard = () => {
     });
   };
 
-  const handleSubmitLoad = () => {
+  const handleSubmitLoad = async () => {
+    setErrorMsg('');
     if (!selectedRepId) {
-      alert('الرجاء اختيار المندوب.');
+      setErrorMsg('الرجاء اختيار المندوب المستلم.');
       return;
     }
     const itemsArray = Object.keys(loadItems).map(id => ({
       productId: id,
-      qty: loadItems[id]
-    }));
+      qty: Number(loadItems[id]) || 0
+    })).filter(i => i.qty > 0);
     
     if (itemsArray.length === 0) {
-      alert('الرجاء تحديد كميات للتحميل.');
+      setErrorMsg('الرجاء تحديد كميات للتحميل.');
       return;
     }
 
-    const res = submitInventoryLoad({
-      repId: selectedRepId,
-      items: itemsArray
-    });
+    try {
+      setIsSubmitting(true);
+      const res = await submitInventoryLoad({
+        repId: selectedRepId,
+        items: itemsArray
+      });
 
-    if (res.success) {
-      setSuccessMsg('تم تحميل البضاعة للمندوب بنجاح وتم تحديث الأرصدة.');
-      setLoadItems({});
-      setSelectedRepId('');
-      setTimeout(() => setSuccessMsg(''), 5000);
-    } else {
-      alert(res.error || 'حدث خطأ أثناء التحميل.');
+      setIsSubmitting(false);
+      if (res.success) {
+        setSuccessMsg('تم تحميل البضاعة للمندوب بنجاح وتم تحديث الأرصدة في المخزن والعهدة.');
+        setLoadItems({});
+        // Keep valid rep selected or reset to first
+        if (salesReps.length > 0) {
+          setSelectedRepId(salesReps[0].id);
+        }
+        setTimeout(() => setSuccessMsg(''), 6000);
+      } else {
+        console.error("Transfer Error:", res.error);
+        setErrorMsg("حدث خطأ أثناء التحميل: " + res.error);
+      }
+    } catch (error) {
+      setIsSubmitting(false);
+      console.error("Transfer Error:", error);
+      setErrorMsg("حدث خطأ غير متوقع: " + error.message);
     }
   };
 
@@ -68,20 +92,45 @@ const StorekeeperDashboard = () => {
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
       
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-white flex items-center gap-2">
-          <Package className="w-6 h-6 text-indigo-600 dark:text-indigo-400" />
-          <span>لوحة تحكم أمين المخزن</span>
-        </h1>
-        <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
-          إدارة المخزون الرئيسي، وتحميل البضائع للمناديب.
-        </p>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-white flex items-center gap-2">
+            <Package className="w-6 h-6 text-indigo-600 dark:text-indigo-400" />
+            <span>لوحة تحكم أمين المخزن</span>
+          </h1>
+          <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
+            إدارة المخزون الرئيسي، وتحميل البضائع للمناديب.
+          </p>
+        </div>
+        <div className="flex items-center gap-3">
+          <Link
+            to="/admin"
+            className="px-4 py-2.5 bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-200 dark:border-indigo-800 text-indigo-600 dark:text-indigo-400 font-bold rounded-xl text-xs hover:bg-indigo-100 dark:hover:bg-indigo-900/60 transition-colors flex items-center gap-2 shadow-sm"
+          >
+            <Layers className="w-4 h-4" />
+            <span>إدارة وتعديل الأصناف</span>
+          </Link>
+          <Link
+            to="/pos"
+            className="px-4 py-2.5 bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 font-bold rounded-xl text-xs hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors flex items-center gap-2"
+          >
+            <ShoppingCart className="w-4 h-4" />
+            <span>شاشة البيع</span>
+          </Link>
+        </div>
       </div>
 
       {successMsg && (
         <div className="p-4 bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200 dark:border-emerald-800 rounded-2xl text-emerald-700 dark:text-emerald-400 flex items-center gap-3">
           <CheckCircle2 className="w-5 h-5" />
           <span className="font-semibold text-sm">{successMsg}</span>
+        </div>
+      )}
+
+      {errorMsg && (
+        <div className="p-4 bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-800 rounded-2xl text-rose-700 dark:text-rose-400 flex items-center gap-3">
+          <AlertCircle className="w-5 h-5 shrink-0" />
+          <span className="font-semibold text-sm">{errorMsg}</span>
         </div>
       )}
 
@@ -113,7 +162,12 @@ const StorekeeperDashboard = () => {
 
               return (
                 <div key={p.id} className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 flex items-center gap-4">
-                  <img src={p.imageUrl} alt={p.name} className="w-16 h-16 rounded-xl object-cover border border-slate-200 dark:border-slate-800 bg-slate-100 dark:bg-slate-950" />
+                  <img 
+                    src={p.image || p.imageUrl || FALLBACK_PRODUCT_IMAGE} 
+                    alt={p.name} 
+                    onError={(e) => { e.currentTarget.src = FALLBACK_PRODUCT_IMAGE; }}
+                    className="w-16 h-16 rounded-xl object-cover border border-slate-200 dark:border-slate-800 bg-slate-100 dark:bg-slate-950" 
+                  />
                   <div className="flex-1">
                     <h3 className="font-bold text-sm line-clamp-1 text-slate-900 dark:text-white">{p.name}</h3>
                     <div className="flex justify-between items-center mt-1 text-xs">
@@ -170,10 +224,15 @@ const StorekeeperDashboard = () => {
                   onChange={(e) => setSelectedRepId(e.target.value)}
                   className="w-full p-2.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl text-sm focus:outline-none focus:border-indigo-500 cursor-pointer text-slate-900 dark:text-white"
                 >
-                  <option value="">-- اختر من القائمة --</option>
-                  {salesReps.map(rep => (
-                    <option key={rep.id} value={rep.id}>{rep.name}</option>
-                  ))}
+                  {salesReps.length === 0 ? (
+                    <option value="">لا يوجد مناديب متاحين حالياً</option>
+                  ) : (
+                    salesReps.map(rep => (
+                      <option key={rep.id} value={rep.id}>
+                        {rep.name}
+                      </option>
+                    ))
+                  )}
                 </select>
               </div>
 
@@ -206,10 +265,14 @@ const StorekeeperDashboard = () => {
 
               <button
                 onClick={handleSubmitLoad}
-                disabled={!selectedRepId || totalItemsToLoad === 0}
-                className="w-full py-3 bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-200 dark:disabled:bg-slate-800 disabled:text-slate-400 text-white font-bold rounded-xl text-sm transition-colors shadow-lg shadow-indigo-600/20 disabled:shadow-none"
+                disabled={!selectedRepId || totalItemsToLoad === 0 || isSubmitting}
+                className="w-full py-3 bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-200 dark:disabled:bg-slate-800 disabled:text-slate-400 text-white font-bold rounded-xl text-sm transition-colors shadow-lg shadow-indigo-600/20 disabled:shadow-none cursor-pointer flex items-center justify-center gap-2"
               >
-                تأكيد التحميل
+                {isSubmitting ? (
+                  <span>جاري تأكيد التحميل...</span>
+                ) : (
+                  <span>تأكيد التحميل للمندوب</span>
+                )}
               </button>
             </div>
           </div>

@@ -3,6 +3,7 @@ import { useData } from '../context/DataContext';
 import { useAuth } from '../context/AuthContext';
 import { doc, updateDoc, deleteDoc } from 'firebase/firestore';
 import { db } from '../firebase/config';
+import { FALLBACK_PRODUCT_IMAGE } from '../firebase/defaultData';
 import { 
   TrendingUp, DollarSign, Package, Users, Shield, Layers, Plus, 
   Upload, Trash2, Edit3, CheckCircle2, AlertCircle, FileText, Search, UserCheck
@@ -16,18 +17,31 @@ const AdminDashboard = () => {
     addUser, updateUser, removeUser, toggleUserActive, addCustomer, getFinancialStats 
   } = useData();
 
-  const [activeTab, setActiveTab] = useState('overview'); // overview, products, users, logs, customers
+  const [activeTab, setActiveTab] = useState(currentUser?.role === 'admin' ? 'overview' : 'products'); // overview, products, users, logs, customers
 
   // --- Product Creation Form State ---
   const [showAddProductModal, setShowAddProductModal] = useState(false);
   const [prodName, setProdName] = useState('');
-  const [prodCategory, setProdCategory] = useState('إلكترونيات');
+  const [prodCategory, setProdCategory] = useState('مواد غذائية');
   const [prodBuyPrice, setProdBuyPrice] = useState('');
   const [prodSellPrice, setProdSellPrice] = useState('');
   const [prodMainStock, setProdMainStock] = useState('');
+  const [prodUnit, setProdUnit] = useState('كرتونة');
+  const [prodImageUrl, setProdImageUrl] = useState('');
   const [selectedImageFile, setSelectedImageFile] = useState(null);
   const [imagePreview, setImagePreview] = useState('');
   const [isUploading, setIsUploading] = useState(false);
+
+  // --- Edit Product Form State ---
+  const [showEditProductModal, setShowEditProductModal] = useState(false);
+  const [editProdId, setEditProdId] = useState('');
+  const [editProdName, setEditProdName] = useState('');
+  const [editProdCategory, setEditProdCategory] = useState('');
+  const [editProdPrice, setEditProdPrice] = useState('');
+  const [editProdCostPrice, setEditProdCostPrice] = useState('');
+  const [editProdStock, setEditProdStock] = useState('');
+  const [editProdUnit, setEditProdUnit] = useState('كرتونة');
+  const [editProdImage, setEditProdImage] = useState('');
 
   // --- User Creation Form State ---
   const [showAddUserModal, setShowAddUserModal] = useState(false);
@@ -67,15 +81,21 @@ const AdminDashboard = () => {
 
   const handleCreateProduct = async (e) => {
     e.preventDefault();
-    if (!prodName || !prodBuyPrice || !prodSellPrice || !prodMainStock) return;
+    if (!prodName || !prodSellPrice || !prodMainStock) return;
 
     setIsUploading(true);
     await addProduct({
       name: prodName,
       category: prodCategory,
-      buyPrice: prodBuyPrice,
-      sellPrice: prodSellPrice,
-      mainStock: prodMainStock
+      costPrice: Number(prodBuyPrice) || 0,
+      buyPrice: Number(prodBuyPrice) || 0,
+      price: Number(prodSellPrice) || 0,
+      sellPrice: Number(prodSellPrice) || 0,
+      stock: Number(prodMainStock) || 0,
+      mainStock: Number(prodMainStock) || 0,
+      unit: prodUnit || 'كرتونة',
+      image: prodImageUrl || imagePreview || FALLBACK_PRODUCT_IMAGE,
+      imageUrl: prodImageUrl || imagePreview || FALLBACK_PRODUCT_IMAGE
     }, selectedImageFile);
 
     setIsUploading(false);
@@ -84,28 +104,51 @@ const AdminDashboard = () => {
     setProdBuyPrice('');
     setProdSellPrice('');
     setProdMainStock('');
+    setProdUnit('كرتونة');
+    setProdImageUrl('');
     setSelectedImageFile(null);
     setImagePreview('');
+  };
+
+  const handleEditProductClick = (p) => {
+    setEditProdId(p.id);
+    setEditProdName(p.name || '');
+    setEditProdCategory(p.category || 'مواد غذائية');
+    setEditProdPrice(p.price !== undefined ? p.price : (p.sellPrice || 0));
+    setEditProdCostPrice(p.costPrice !== undefined ? p.costPrice : (p.buyPrice || 0));
+    setEditProdStock(p.stock !== undefined ? p.stock : (p.mainStock || 0));
+    setEditProdUnit(p.unit || 'كرتونة');
+    setEditProdImage(p.image || p.imageUrl || '');
+    setShowEditProductModal(true);
+  };
+
+  const handleUpdateProductSubmit = async (e) => {
+    e.preventDefault();
+    if (!editProdId || !editProdName) return;
+
+    await updateProduct(editProdId, {
+      name: editProdName,
+      category: editProdCategory,
+      price: Number(editProdPrice) || 0,
+      sellPrice: Number(editProdPrice) || 0,
+      costPrice: Number(editProdCostPrice) || 0,
+      buyPrice: Number(editProdCostPrice) || 0,
+      stock: Number(editProdStock) || 0,
+      mainStock: Number(editProdStock) || 0,
+      unit: editProdUnit,
+      image: editProdImage || FALLBACK_PRODUCT_IMAGE,
+      imageUrl: editProdImage || FALLBACK_PRODUCT_IMAGE
+    });
+    setShowEditProductModal(false);
   };
 
   const handleCreateUser = async (e) => {
     e.preventDefault();
     if (!userName || !userEmail || !userPin) return;
-    const finalPin = userPin.padEnd(6, userPin.charAt(0) || '0');
+    const finalPin = String(userPin).trim();
     
-    // Attempt Firestore write
-    try {
-      // Create a unique ID for the user Document
-      const newUserId = 'u' + Date.now();
-      const userRef = doc(db, 'users', newUserId);
-      await import('firebase/firestore').then(({ setDoc }) => 
-        setDoc(userRef, { name: userName, email: userEmail, role: userRole, pin: finalPin })
-      );
-      addUser({ id: newUserId, name: userName, email: userEmail, role: userRole, pin: finalPin });
-    } catch (error) {
-      console.warn("Firestore create skipped or failed:", error);
-      addUser({ name: userName, email: userEmail, role: userRole, pin: finalPin });
-    }
+    const newUserId = 'u' + Date.now();
+    await addUser({ id: newUserId, name: userName, email: userEmail, role: userRole, pin: finalPin, isActive: true });
     
     setShowAddUserModal(false);
     setUserName('');
@@ -125,30 +168,17 @@ const AdminDashboard = () => {
     e.preventDefault();
     if (!editUserName || !editUserRole || !editUserId) return;
     
-    const finalPin = editUserPin ? editUserPin.padEnd(6, editUserPin.charAt(0) || '0') : '';
+    const finalPin = editUserPin ? String(editUserPin).trim() : undefined;
+    const updates = { name: editUserName, role: editUserRole };
+    if (finalPin) updates.pin = finalPin;
 
-    try {
-      const userRef = doc(db, 'users', editUserId);
-      const updates = { name: editUserName, role: editUserRole };
-      if (finalPin) updates.pin = finalPin;
-      await updateDoc(userRef, updates);
-    } catch (error) {
-      console.warn("Firestore update skipped or failed:", error);
-    }
-    const localUpdates = { name: editUserName, role: editUserRole };
-    if (finalPin) localUpdates.pin = finalPin;
-    updateUser(editUserId, localUpdates);
+    await updateUser(editUserId, updates);
     setShowEditUserModal(false);
   };
 
   const handleDeleteUserClick = async (userId) => {
     if (window.confirm("هل أنت متأكد من حذف هذا الموظف؟ لا يمكن التراجع عن هذا الإجراء.")) {
-      try {
-        await deleteDoc(doc(db, 'users', userId));
-      } catch (error) {
-        console.warn("Firestore delete skipped or failed:", error);
-      }
-      removeUser(userId);
+      await removeUser(userId);
     }
   };
 
@@ -180,23 +210,29 @@ const AdminDashboard = () => {
             <span className="p-2 bg-indigo-100 dark:bg-indigo-600/20 text-indigo-600 dark:text-indigo-400 rounded-lg border border-indigo-200 dark:border-indigo-800">
               <Shield className="w-5 h-5" />
             </span>
-            <h1 className="text-2xl font-bold tracking-tight">لوحة تحكم التاجر (الإدارة)</h1>
+            <h1 className="text-2xl font-bold tracking-tight">
+              {currentUser?.role === 'admin' ? 'لوحة تحكم التاجر (الإدارة)' : 'إدارة المنتجات والمخزن'}
+            </h1>
           </div>
           <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-            إدارة كاملة للمنتجات، حساب الأرباح، المستخدمين، وسجلات حركة المخزن.
+            {currentUser?.role === 'admin' 
+              ? 'إدارة كاملة للمنتجات، حساب الأرباح، المستخدمين، وسجلات حركة المخزن.'
+              : 'إدارة وتعديل المنتجات ومراقبة السجلات.'}
           </p>
         </div>
 
         {/* Tab Selection Navigation */}
         <div className="flex items-center gap-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-1.5 rounded-2xl overflow-x-auto">
-          <button
-            onClick={() => setActiveTab('overview')}
-            className={`px-3.5 py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
-              activeTab === 'overview' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-            }`}
-          >
-            نظرة عامة
-          </button>
+          {currentUser?.role === 'admin' && (
+            <button
+              onClick={() => setActiveTab('overview')}
+              className={`px-3.5 py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
+                activeTab === 'overview' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+              }`}
+            >
+              نظرة عامة
+            </button>
+          )}
           <button
             onClick={() => setActiveTab('products')}
             className={`px-3.5 py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
@@ -205,22 +241,26 @@ const AdminDashboard = () => {
           >
             المنتجات ({products.length})
           </button>
-          <button
-            onClick={() => setActiveTab('users')}
-            className={`px-3.5 py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
-              activeTab === 'users' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-            }`}
-          >
-            فريق العمل ({users.length})
-          </button>
-          <button
-            onClick={() => setActiveTab('customers')}
-            className={`px-3.5 py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
-              activeTab === 'customers' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-            }`}
-          >
-            الزبائن والديون
-          </button>
+          {currentUser?.role === 'admin' && (
+            <button
+              onClick={() => setActiveTab('users')}
+              className={`px-3.5 py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
+                activeTab === 'users' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+              }`}
+            >
+              فريق العمل ({users.length})
+            </button>
+          )}
+          {currentUser?.role === 'admin' && (
+            <button
+              onClick={() => setActiveTab('customers')}
+              className={`px-3.5 py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
+                activeTab === 'customers' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+              }`}
+            >
+              الزبائن والديون
+            </button>
+          )}
           <button
             onClick={() => setActiveTab('logs')}
             className={`px-3.5 py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
@@ -382,38 +422,63 @@ const AdminDashboard = () => {
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800 text-slate-700 dark:text-slate-200">
                 {products.map(p => {
-                  const profitUnit = p.sellPrice - p.buyPrice;
-                  const marginPct = p.buyPrice > 0 ? ((profitUnit / p.buyPrice) * 100).toFixed(0) : 0;
+                  const buyP = Number(p.costPrice !== undefined ? p.costPrice : p.buyPrice) || 0;
+                  const sellP = Number(p.price !== undefined ? p.price : p.sellPrice) || 0;
+                  const currentStock = Number(p.stock !== undefined ? p.stock : p.mainStock) || 0;
+                  const profitUnit = sellP - buyP;
+                  const marginPct = buyP > 0 ? ((profitUnit / buyP) * 100).toFixed(0) : 0;
+                  const imgSrc = p.image || p.imageUrl || FALLBACK_PRODUCT_IMAGE;
+
                   return (
                     <tr key={p.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-colors">
                       <td className="p-4 flex items-center gap-3">
-                        <img src={p.imageUrl} alt={p.name} className="w-10 h-10 rounded-lg object-cover bg-slate-100 dark:bg-slate-950 border border-slate-200 dark:border-slate-800" />
+                        <img 
+                          src={imgSrc} 
+                          alt={p.name} 
+                          onError={(e) => { e.target.src = FALLBACK_PRODUCT_IMAGE; }}
+                          className="w-10 h-10 rounded-lg object-cover bg-slate-100 dark:bg-slate-950 border border-slate-200 dark:border-slate-800" 
+                        />
                         <div>
-                          <div className="font-semibold">{p.name}</div>
-                          <div className="text-[10px] text-slate-400 dark:text-slate-500 font-mono" dir="ltr">ID: {p.id}</div>
+                          <div className="font-semibold text-slate-900 dark:text-white">{p.name}</div>
+                          <div className="text-[10px] text-slate-400 dark:text-slate-500 font-mono" dir="ltr">
+                            ID: {p.id} {p.unit ? `| ${p.unit}` : ''}
+                          </div>
                         </div>
                       </td>
                       <td className="p-4"><span className="px-2.5 py-1 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 rounded-lg">{p.category}</span></td>
-                      <td className="p-4 text-left font-mono text-slate-500 dark:text-slate-400" dir="ltr">${p.buyPrice.toFixed(2)}</td>
-                      <td className="p-4 text-left font-mono text-indigo-600 dark:text-indigo-400 font-semibold" dir="ltr">${p.sellPrice.toFixed(2)}</td>
+                      <td className="p-4 text-left font-mono text-slate-500 dark:text-slate-400" dir="ltr">${buyP.toFixed(2)}</td>
+                      <td className="p-4 text-left font-mono text-indigo-600 dark:text-indigo-400 font-semibold" dir="ltr">${sellP.toFixed(2)}</td>
                       <td className="p-4 text-left font-mono text-emerald-600 dark:text-emerald-400 font-bold" dir="ltr">
                         +${profitUnit.toFixed(2)} <span className="text-[10px] text-emerald-500">({marginPct}%)</span>
                       </td>
                       <td className="p-4 text-center">
                         <span className={`px-2.5 py-1 rounded-full font-bold ${
-                          p.mainStock <= 10 ? 'bg-amber-100 dark:bg-amber-950 text-amber-600 dark:text-amber-400 border border-amber-200 dark:border-amber-800' : 'bg-slate-100 dark:bg-slate-950 text-slate-600 dark:text-slate-300'
+                          currentStock <= 10 ? 'bg-amber-100 dark:bg-amber-950 text-amber-600 dark:text-amber-400 border border-amber-200 dark:border-amber-800' : 'bg-slate-100 dark:bg-slate-950 text-slate-600 dark:text-slate-300'
                         }`}>
-                          {p.mainStock} وحدة
+                          {currentStock} {p.unit || 'وحدة'}
                         </span>
                       </td>
                       <td className="p-4 text-center">
-                        <button 
-                          onClick={() => deleteProduct(p.id)}
-                          className="p-1.5 text-slate-400 hover:text-rose-500 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors"
-                          title="حذف المنتج"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
+                        <div className="flex items-center justify-center gap-1">
+                          <button 
+                            onClick={() => handleEditProductClick(p)}
+                            className="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
+                            title="تعديل المنتج"
+                          >
+                            <Edit3 className="w-4 h-4" />
+                          </button>
+                          <button 
+                            onClick={() => {
+                              if (window.confirm(`هل أنت متأكد من حذف المنتج (${p.name})؟`)) {
+                                deleteProduct(p.id);
+                              }
+                            }}
+                            className="p-1.5 text-slate-400 hover:text-rose-500 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
+                            title="حذف المنتج"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   );
@@ -595,7 +660,7 @@ const AdminDashboard = () => {
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-3 gap-3">
                 <div>
                   <label className="text-xs font-bold text-slate-700 dark:text-slate-300 mb-1 block">الصنف</label>
                   <select
@@ -603,15 +668,33 @@ const AdminDashboard = () => {
                     onChange={(e) => setProdCategory(e.target.value)}
                     className="w-full p-2.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl text-xs focus:outline-none focus:border-indigo-500"
                   >
+                    <option value="مواد غذائية">مواد غذائية</option>
+                    <option value="مشروبات">مشروبات</option>
+                    <option value="منظفات ورقيات">منظفات ورقيات</option>
                     <option value="إلكترونيات">إلكترونيات</option>
                     <option value="أثاث مكتبي">أثاث مكتبي</option>
                     <option value="معدات">معدات</option>
-                    <option value="تخزين">تخزين</option>
                     <option value="أخرى">أخرى</option>
                   </select>
                 </div>
                 <div>
-                  <label className="text-xs font-bold text-slate-700 dark:text-slate-300 mb-1 block">الكمية (الرصيد الافتتاحي) *</label>
+                  <label className="text-xs font-bold text-slate-700 dark:text-slate-300 mb-1 block">الوحدة</label>
+                  <select
+                    value={prodUnit}
+                    onChange={(e) => setProdUnit(e.target.value)}
+                    className="w-full p-2.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl text-xs focus:outline-none focus:border-indigo-500"
+                  >
+                    <option value="كرتونة">كرتونة</option>
+                    <option value="كيس">كيس</option>
+                    <option value="عبوة">عبوة</option>
+                    <option value="تنكة">تنكة</option>
+                    <option value="قطعة">قطعة</option>
+                    <option value="شاشة">شاشة</option>
+                    <option value="جهاز">جهاز</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-slate-700 dark:text-slate-300 mb-1 block">الكمية *</label>
                   <input
                     type="number"
                     required
@@ -627,11 +710,10 @@ const AdminDashboard = () => {
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="text-xs font-bold text-slate-700 dark:text-slate-300 mb-1 block">سعر الشراء ($) *</label>
+                  <label className="text-xs font-bold text-slate-700 dark:text-slate-300 mb-1 block">سعر التكلفة / الشراء ($)</label>
                   <input
                     type="number"
                     step="0.01"
-                    required
                     placeholder="150.00"
                     value={prodBuyPrice}
                     onChange={(e) => setProdBuyPrice(e.target.value)}
@@ -654,11 +736,22 @@ const AdminDashboard = () => {
                 </div>
               </div>
 
-              {/* REQUIREMENT #1: Input type="file" for direct Firebase Storage Upload */}
+              <div>
+                <label className="text-xs font-bold text-slate-700 dark:text-slate-300 mb-1 block">رابط الصورة (URL)</label>
+                <input
+                  type="url"
+                  placeholder="https://images.unsplash.com/..."
+                  value={prodImageUrl}
+                  onChange={(e) => setProdImageUrl(e.target.value)}
+                  className="w-full p-2.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl text-xs focus:outline-none focus:border-indigo-500 font-mono"
+                  dir="ltr"
+                />
+              </div>
+
               <div>
                 <label className="text-xs font-bold text-slate-700 dark:text-slate-300 mb-1 flex items-center gap-1.5">
                   <Upload className="w-4 h-4 text-indigo-500 dark:text-indigo-400" />
-                  <span>رفع صورة المنتج (تخزن في Firebase)</span>
+                  <span>أو ارفع ملف صورة</span>
                 </label>
                 <input
                   type="file"
@@ -666,10 +759,15 @@ const AdminDashboard = () => {
                   onChange={handleImageFileChange}
                   className="w-full text-xs text-slate-500 dark:text-slate-400 file:ml-3 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-semibold file:bg-indigo-600 file:text-white hover:file:bg-indigo-500 cursor-pointer"
                 />
-                {imagePreview && (
+                {(imagePreview || prodImageUrl) && (
                   <div className="mt-2 flex items-center gap-3">
-                    <img src={imagePreview} alt="Preview" className="w-12 h-12 rounded-lg object-cover border border-slate-200 dark:border-slate-800" />
-                    <span className="text-[11px] text-emerald-600 dark:text-emerald-400">تم إرفاق الصورة بنجاح</span>
+                    <img 
+                      src={imagePreview || prodImageUrl} 
+                      alt="Preview" 
+                      onError={(e) => { e.target.src = FALLBACK_PRODUCT_IMAGE; }}
+                      className="w-12 h-12 rounded-lg object-cover border border-slate-200 dark:border-slate-800" 
+                    />
+                    <span className="text-[11px] text-emerald-600 dark:text-emerald-400">معاينة الصورة</span>
                   </div>
                 )}
               </div>
@@ -678,16 +776,149 @@ const AdminDashboard = () => {
                 <button
                   type="button"
                   onClick={() => setShowAddProductModal(false)}
-                  className="px-4 py-2 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 rounded-xl text-xs font-semibold"
+                  className="px-4 py-2 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 rounded-xl text-xs font-semibold cursor-pointer"
                 >
                   إلغاء
                 </button>
                 <button
                   type="submit"
                   disabled={isUploading}
-                  className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-semibold shadow-lg shadow-indigo-600/20"
+                  className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-semibold shadow-lg shadow-indigo-600/20 cursor-pointer"
                 >
                   {isUploading ? 'جاري الرفع...' : 'حفظ المنتج'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* EDIT PRODUCT MODAL */}
+      {showEditProductModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 dark:bg-slate-950/80 backdrop-blur-sm p-4 overflow-y-auto">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 max-w-lg w-full shadow-2xl">
+            <h3 className="text-lg font-bold mb-4">تعديل بيانات المنتج</h3>
+            <form onSubmit={handleUpdateProductSubmit} className="space-y-4">
+              <div>
+                <label className="text-xs font-bold text-slate-700 dark:text-slate-300 mb-1 block">اسم المنتج *</label>
+                <input
+                  type="text"
+                  required
+                  value={editProdName}
+                  onChange={(e) => setEditProdName(e.target.value)}
+                  className="w-full p-2.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl text-xs focus:outline-none focus:border-indigo-500"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-bold text-slate-700 dark:text-slate-300 mb-1 block">الصنف</label>
+                  <select
+                    value={editProdCategory}
+                    onChange={(e) => setEditProdCategory(e.target.value)}
+                    className="w-full p-2.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl text-xs focus:outline-none focus:border-indigo-500"
+                  >
+                    <option value="مواد غذائية">مواد غذائية</option>
+                    <option value="مشروبات">مشروبات</option>
+                    <option value="منظفات ورقيات">منظفات ورقيات</option>
+                    <option value="إلكترونيات">إلكترونيات</option>
+                    <option value="أثاث مكتبي">أثاث مكتبي</option>
+                    <option value="معدات">معدات</option>
+                    <option value="أخرى">أخرى</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-slate-700 dark:text-slate-300 mb-1 block">الوحدة</label>
+                  <select
+                    value={editProdUnit}
+                    onChange={(e) => setEditProdUnit(e.target.value)}
+                    className="w-full p-2.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl text-xs focus:outline-none focus:border-indigo-500"
+                  >
+                    <option value="كرتونة">كرتونة</option>
+                    <option value="كيس">كيس</option>
+                    <option value="عبوة">عبوة</option>
+                    <option value="تنكة">تنكة</option>
+                    <option value="قطعة">قطعة</option>
+                    <option value="شاشة">شاشة</option>
+                    <option value="جهاز">جهاز</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-3 gap-3">
+                <div>
+                  <label className="text-xs font-bold text-slate-700 dark:text-slate-300 mb-1 block">الكمية بالمخزن *</label>
+                  <input
+                    type="number"
+                    required
+                    min="0"
+                    value={editProdStock}
+                    onChange={(e) => setEditProdStock(e.target.value)}
+                    className="w-full p-2.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl text-xs focus:outline-none focus:border-indigo-500"
+                    dir="ltr"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-slate-700 dark:text-slate-300 mb-1 block">سعر التكلفة ($)</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={editProdCostPrice}
+                    onChange={(e) => setEditProdCostPrice(e.target.value)}
+                    className="w-full p-2.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl text-xs focus:outline-none focus:border-indigo-500 font-mono"
+                    dir="ltr"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-slate-700 dark:text-slate-300 mb-1 block">سعر البيع ($) *</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    required
+                    value={editProdPrice}
+                    onChange={(e) => setEditProdPrice(e.target.value)}
+                    className="w-full p-2.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl text-xs focus:outline-none focus:border-indigo-500 font-mono"
+                    dir="ltr"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="text-xs font-bold text-slate-700 dark:text-slate-300 mb-1 block">رابط الصورة (URL)</label>
+                <input
+                  type="url"
+                  placeholder="https://images.unsplash.com/..."
+                  value={editProdImage}
+                  onChange={(e) => setEditProdImage(e.target.value)}
+                  className="w-full p-2.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl text-xs focus:outline-none focus:border-indigo-500 font-mono"
+                  dir="ltr"
+                />
+                {editProdImage && (
+                  <div className="mt-2 flex items-center gap-3">
+                    <img 
+                      src={editProdImage} 
+                      alt="Preview" 
+                      onError={(e) => { e.target.src = FALLBACK_PRODUCT_IMAGE; }}
+                      className="w-12 h-12 rounded-lg object-cover border border-slate-200 dark:border-slate-800" 
+                    />
+                    <span className="text-[11px] text-emerald-600 dark:text-emerald-400">معاينة الصورة</span>
+                  </div>
+                )}
+              </div>
+
+              <div className="flex justify-end gap-3 pt-4 border-t border-slate-200 dark:border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setShowEditProductModal(false)}
+                  className="px-4 py-2 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 rounded-xl text-xs font-semibold cursor-pointer"
+                >
+                  إلغاء
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-semibold shadow-lg shadow-indigo-600/20 cursor-pointer"
+                >
+                  حفظ التعديلات
                 </button>
               </div>
             </form>

@@ -2,6 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useData } from '../context/DataContext';
 import ReceiptModal from './ReceiptModal';
+import { FALLBACK_PRODUCT_IMAGE } from '../firebase/defaultData';
 import { 
   Search, User, ShoppingCart, DollarSign, Plus, Minus, Trash2, 
   Receipt, Store, Phone, MapPin, AlertTriangle
@@ -39,20 +40,29 @@ const POSScreen = () => {
   // Available stock items depending on user role
   const availableProducts = useMemo(() => {
     if (userRole === 'sales_rep') {
-      const repStock = subInventories[currentUser?.id] || [];
+      const repStock = subInventories[currentUser?.id] || 
+                       (currentUser?.id === 'rep_1' ? subInventories['u2'] : null) ||
+                       (currentUser?.id === 'u2' ? subInventories['rep_1'] : null) ||
+                       (currentUser?.id === 'rep_2' ? subInventories['u3'] : null) ||
+                       (currentUser?.id === 'u3' ? subInventories['rep_2'] : null) ||
+                       [];
       return products.map(prod => {
         const itemInSub = repStock.find(s => s.productId === prod.id);
-        const subQty = itemInSub ? itemInSub.qty : 0;
+        const subQty = itemInSub ? (Number(itemInSub.qty) || 0) : 0;
         return {
           ...prod,
+          sellPrice: Number(prod.sellPrice || prod.price || 0),
+          buyPrice: Number(prod.buyPrice || 0),
           availableStock: subQty
         };
       }).filter(p => p.availableStock > 0 || productSearch.length > 0);
     } else {
-      // Storekeeper direct sale from mainStock
+      // Storekeeper / Admin direct sale from mainStock
       return products.map(prod => ({
         ...prod,
-        availableStock: prod.mainStock
+        sellPrice: Number(prod.sellPrice || prod.price || 0),
+        buyPrice: Number(prod.buyPrice || 0),
+        availableStock: Number(prod.mainStock !== undefined ? prod.mainStock : prod.stock) || 0
       }));
     }
   }, [products, subInventories, currentUser, userRole, productSearch]);
@@ -293,8 +303,9 @@ const POSScreen = () => {
                   {/* Product Image & Details */}
                   <div className="flex items-start gap-3 mb-4">
                     <img
-                      src={product.imageUrl}
+                      src={product.image || product.imageUrl || FALLBACK_PRODUCT_IMAGE}
                       alt={product.name}
+                      onError={(e) => { e.currentTarget.src = FALLBACK_PRODUCT_IMAGE; }}
                       className="w-16 h-16 rounded-xl object-cover bg-slate-100 dark:bg-slate-800 shrink-0 border border-slate-200 dark:border-slate-800"
                     />
                     <div>

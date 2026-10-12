@@ -19,11 +19,11 @@ function App() {
                   {/* 1. Customer (Public) Catalog */}
                   <Route path="/" element={<PublicCatalogPage />} />
                   
-                  {/* 2. Admin (Owner) Dashboard */}
+                  {/* 2. Admin & Storekeeper Management Dashboard */}
                   <Route 
                     path="/admin" 
                     element={
-                      <ProtectedRoute allowedRoles={['admin']}>
+                      <ProtectedRoute allowedRoles={['admin', 'storekeeper']}>
                         <AdminDashboard />
                       </ProtectedRoute>
                     } 

@@ -3,39 +3,57 @@ import { useAuth } from '../context/AuthContext';
 import { useData } from '../context/DataContext';
 import { Layers, Package, ShoppingCart, User, ArrowRight } from 'lucide-react';
 import { Link } from 'react-router-dom';
+import { FALLBACK_PRODUCT_IMAGE } from '../firebase/defaultData';
 
 const SalesRepDashboard = () => {
   const { currentUser } = useAuth();
   const { products, subInventories, inventoryLogs, orders } = useData();
 
-  // Get current rep's inventory
-  const myInventory = subInventories[currentUser?.id] || [];
+  // Get current rep's inventory (supporting direct ID or aliases like rep_1 / u2)
+  const myInventory = subInventories[currentUser?.id] || 
+                      (currentUser?.id === 'rep_1' ? subInventories['u2'] : null) ||
+                      (currentUser?.id === 'u2' ? subInventories['rep_1'] : null) ||
+                      (currentUser?.id === 'rep_2' ? subInventories['u3'] : null) ||
+                      (currentUser?.id === 'u3' ? subInventories['rep_2'] : null) ||
+                      [];
 
   // Enriched inventory data
   const myStockItems = myInventory.map(item => {
     const prod = products.find(p => p.id === item.productId);
+    const itemQty = Number(item.qty) || 0;
+    const sellPrice = Number(prod?.sellPrice || prod?.price || item.price || 0);
     return {
       ...item,
-      productName: prod?.name || 'منتج غير معروف',
+      qty: itemQty,
+      productName: prod?.name || item.name || 'منتج غير معروف',
       category: prod?.category || '',
-      imageUrl: prod?.imageUrl || '',
-      sellPrice: prod?.sellPrice || 0
+      imageUrl: prod?.imageUrl || item.imageUrl || '',
+      sellPrice: sellPrice
     };
   });
 
-  // Calculate some stats
-  const totalItemsCount = myStockItems.reduce((sum, item) => sum + item.qty, 0);
-  const totalStockValue = myStockItems.reduce((sum, item) => sum + (item.qty * item.sellPrice), 0);
+  // Calculate stats
+  const totalItemsCount = myStockItems.reduce((sum, item) => sum + (Number(item.qty) || 0), 0);
+  const totalStockValue = myStockItems.reduce((sum, item) => sum + ((Number(item.qty) || 0) * (Number(item.sellPrice) || 0)), 0);
 
   // My recent loads
   const myRecentLoads = inventoryLogs
-    .filter(log => log.type === 'load' && log.targetRepId === currentUser?.id)
+    .filter(log => log.type === 'load' && (
+      log.targetRepId === currentUser?.id ||
+      (currentUser?.id === 'rep_1' && log.targetRepId === 'u2') ||
+      (currentUser?.id === 'u2' && log.targetRepId === 'rep_1') ||
+      (currentUser?.id === 'rep_2' && log.targetRepId === 'u3') ||
+      (currentUser?.id === 'u3' && log.targetRepId === 'rep_2')
+    ))
     .sort((a, b) => b.timestamp - a.timestamp)
     .slice(0, 5);
 
   // My recent sales
   const myRecentSales = orders
-    .filter(o => o.createdBy === currentUser?.id)
+    .filter(o => o.createdBy === currentUser?.id ||
+      (currentUser?.id === 'rep_1' && o.createdBy === 'u2') ||
+      (currentUser?.id === 'u2' && o.createdBy === 'rep_1')
+    )
     .sort((a, b) => b.createdAt - a.createdAt)
     .slice(0, 5);
 
@@ -113,7 +131,12 @@ const SalesRepDashboard = () => {
                   myStockItems.map(item => (
                     <tr key={item.productId} className="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
                       <td className="p-4 flex items-center gap-3">
-                        <img src={item.imageUrl} alt={item.productName} className="w-10 h-10 rounded-lg object-cover bg-slate-100 dark:bg-slate-950 border border-slate-200 dark:border-slate-800" />
+                        <img 
+                          src={item.image || item.imageUrl || FALLBACK_PRODUCT_IMAGE} 
+                          alt={item.productName} 
+                          onError={(e) => { e.currentTarget.src = FALLBACK_PRODUCT_IMAGE; }}
+                          className="w-10 h-10 rounded-lg object-cover bg-slate-100 dark:bg-slate-950 border border-slate-200 dark:border-slate-800" 
+                        />
                         <div>
                           <div className="font-bold text-slate-900 dark:text-white">{item.productName}</div>
                           <div className="text-xs text-slate-500 dark:text-slate-400">{item.category}</div>

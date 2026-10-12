@@ -1,15 +1,69 @@
-import React from 'react';
+import React, { useRef } from 'react';
+import { useReactToPrint } from 'react-to-print';
 import { Printer, X, CheckCircle2, Building2, Phone, MapPin } from 'lucide-react';
 
 const ReceiptModal = ({ order, onClose }) => {
-  if (!order) return null;
+  const componentRef = useRef(null);
+
+  let printFn;
+  try {
+    printFn = useReactToPrint({
+      contentRef: componentRef,
+      content: () => componentRef.current,
+      documentTitle: `Receipt_${order?.id}`,
+      onPrintError: (error) => {
+        console.warn("ReactToPrint error, using window.print():", error);
+        window.print();
+      }
+    });
+  } catch (err) {
+    console.warn("useReactToPrint init warning:", err);
+  }
 
   const handlePrint = () => {
-    window.print();
+    try {
+      if (typeof printFn === 'function') {
+        printFn();
+      } else {
+        window.print();
+      }
+    } catch (error) {
+      console.warn("handlePrint fallback:", error);
+      window.print();
+    }
   };
+
+  if (!order) return null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4 overflow-y-auto" dir="rtl">
+      {/* Inject print stylesheet for clean browser printing */}
+      <style>{`
+        @media print {
+          body * {
+            visibility: hidden !important;
+          }
+          #printable-receipt, #printable-receipt * {
+            visibility: visible !important;
+          }
+          #printable-receipt {
+            position: fixed !important;
+            left: 0 !important;
+            top: 0 !important;
+            width: 100% !important;
+            max-width: 100% !important;
+            margin: 0 !important;
+            padding: 20px !important;
+            background: white !important;
+            color: black !important;
+            box-shadow: none !important;
+            border: none !important;
+          }
+          .no-print {
+            display: none !important;
+          }
+        }
+      `}</style>
       <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xl max-w-lg w-full overflow-hidden text-slate-900 dark:text-slate-100 animate-in fade-in zoom-in-95 duration-200">
         
         {/* Modal Action Header (Hidden during print) */}
@@ -36,7 +90,7 @@ const ReceiptModal = ({ order, onClose }) => {
         </div>
 
         {/* Printable Thermal Receipt Container */}
-        <div id="printable-receipt" className="p-6 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100">
+        <div id="printable-receipt" ref={componentRef} className="p-6 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100">
           {/* Header */}
           <div className="text-center pb-4 border-b border-dashed border-slate-300 dark:border-slate-700">
             <h1 className="text-xl font-bold tracking-tight uppercase">أبيكس للمبيعات والمخازن</h1>
