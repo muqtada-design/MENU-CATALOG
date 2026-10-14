@@ -4,6 +4,7 @@ import { useAuth } from '../context/AuthContext';
 import { doc, updateDoc, deleteDoc } from 'firebase/firestore';
 import { db } from '../firebase/config';
 import { FALLBACK_PRODUCT_IMAGE } from '../firebase/defaultData';
+import { formatIQD } from '../utils/currency';
 import { 
   TrendingUp, DollarSign, Package, Users, Shield, Layers, Plus, 
   Upload, Trash2, Edit3, CheckCircle2, AlertCircle, FileText, Search, UserCheck
@@ -13,7 +14,7 @@ const AdminDashboard = () => {
   const { currentUser } = useAuth();
   const { 
     products, users, customers, inventoryLogs, orders, 
-    addProduct, updateProduct, deleteProduct, 
+    addProduct, updateProduct, updateProductWithImage, deleteProduct, 
     addUser, updateUser, removeUser, toggleUserActive, addCustomer, getFinancialStats 
   } = useData();
 
@@ -42,6 +43,8 @@ const AdminDashboard = () => {
   const [editProdStock, setEditProdStock] = useState('');
   const [editProdUnit, setEditProdUnit] = useState('كرتونة');
   const [editProdImage, setEditProdImage] = useState('');
+  const [editProdImageFile, setEditProdImageFile] = useState(null);
+  const [editProdImagePreview, setEditProdImagePreview] = useState('');
 
   // --- User Creation Form State ---
   const [showAddUserModal, setShowAddUserModal] = useState(false);
@@ -119,14 +122,26 @@ const AdminDashboard = () => {
     setEditProdStock(p.stock !== undefined ? p.stock : (p.mainStock || 0));
     setEditProdUnit(p.unit || 'كرتونة');
     setEditProdImage(p.image || p.imageUrl || '');
+    setEditProdImageFile(null);
+    setEditProdImagePreview('');
     setShowEditProductModal(true);
+  };
+
+  const handleEditImageFileChange = (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      setEditProdImageFile(file);
+      const reader = new FileReader();
+      reader.onloadend = () => setEditProdImagePreview(reader.result);
+      reader.readAsDataURL(file);
+    }
   };
 
   const handleUpdateProductSubmit = async (e) => {
     e.preventDefault();
     if (!editProdId || !editProdName) return;
-
-    await updateProduct(editProdId, {
+    setIsUploading(true);
+    await updateProductWithImage(editProdId, {
       name: editProdName,
       category: editProdCategory,
       price: Number(editProdPrice) || 0,
@@ -138,8 +153,11 @@ const AdminDashboard = () => {
       unit: editProdUnit,
       image: editProdImage || FALLBACK_PRODUCT_IMAGE,
       imageUrl: editProdImage || FALLBACK_PRODUCT_IMAGE
-    });
+    }, editProdImageFile || null);
+    setIsUploading(false);
     setShowEditProductModal(false);
+    setEditProdImageFile(null);
+    setEditProdImagePreview('');
   };
 
   const handleCreateUser = async (e) => {
@@ -446,10 +464,10 @@ const AdminDashboard = () => {
                         </div>
                       </td>
                       <td className="p-4"><span className="px-2.5 py-1 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 rounded-lg">{p.category}</span></td>
-                      <td className="p-4 text-left font-mono text-slate-500 dark:text-slate-400" dir="ltr">${buyP.toFixed(2)}</td>
-                      <td className="p-4 text-left font-mono text-indigo-600 dark:text-indigo-400 font-semibold" dir="ltr">${sellP.toFixed(2)}</td>
+                      <td className="p-4 text-left font-mono text-slate-500 dark:text-slate-400" dir="ltr">{formatIQD(buyP)}</td>
+                      <td className="p-4 text-left font-mono text-indigo-600 dark:text-indigo-400 font-semibold" dir="ltr">{formatIQD(sellP)}</td>
                       <td className="p-4 text-left font-mono text-emerald-600 dark:text-emerald-400 font-bold" dir="ltr">
-                        +${profitUnit.toFixed(2)} <span className="text-[10px] text-emerald-500">({marginPct}%)</span>
+                        +{formatIQD(profitUnit)} <span className="text-[10px] text-emerald-500">({marginPct}%)</span>
                       </td>
                       <td className="p-4 text-center">
                         <span className={`px-2.5 py-1 rounded-full font-bold ${
@@ -579,8 +597,8 @@ const AdminDashboard = () => {
                     <h3 className="font-bold text-base">{c.storeName}</h3>
                     <p className="text-xs text-slate-500 dark:text-slate-400">المالك: {c.ownerName}</p>
                   </div>
-                  <span className="font-mono text-sm font-bold text-amber-600 dark:text-amber-400 bg-amber-100 dark:bg-amber-950 px-2.5 py-1 rounded-xl border border-amber-200 dark:border-amber-800" dir="ltr">
-                    ${c.balance.toFixed(2)} دين
+                  <span className="font-mono text-sm font-bold text-amber-600 dark:text-amber-400 bg-amber-100 dark:bg-amber-950 px-2.5 py-1 rounded-xl border border-amber-200 dark:border-amber-800">
+                    {formatIQD(c.balance)} دين
                   </span>
                 </div>
                 <div className="text-xs text-slate-500 dark:text-slate-400 space-y-1">
@@ -615,9 +633,13 @@ const AdminDashboard = () => {
                     <td className="p-4 font-mono text-slate-500 dark:text-slate-400" dir="ltr">{log.id}</td>
                     <td className="p-4">
                       <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold uppercase ${
-                        log.type === 'load' ? 'bg-indigo-100 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-800' : 'bg-amber-100 dark:bg-amber-950 text-amber-600 dark:text-amber-400 border border-amber-200 dark:border-amber-800'
+                        log.type === 'load' 
+                          ? 'bg-indigo-100 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-800' 
+                          : log.type === 'return'
+                            ? 'bg-rose-100 dark:bg-rose-950 text-rose-600 dark:text-rose-400 border border-rose-200 dark:border-rose-800'
+                            : 'bg-amber-100 dark:bg-amber-950 text-amber-600 dark:text-amber-400 border border-amber-200 dark:border-amber-800'
                       }`}>
-                        {log.type === 'load' ? 'تحميل' : 'بيع مباشر'}
+                        {log.type === 'load' ? 'تحميل' : log.type === 'return' ? 'إرجاع' : 'بيع مباشر'}
                       </span>
                     </td>
                     <td className="p-4 font-medium">{log.handledByName}</td>
@@ -710,11 +732,11 @@ const AdminDashboard = () => {
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="text-xs font-bold text-slate-700 dark:text-slate-300 mb-1 block">سعر التكلفة / الشراء ($)</label>
+                  <label className="text-xs font-bold text-slate-700 dark:text-slate-300 mb-1 block">سعر التكلفة / الشراء (د.ع)</label>
                   <input
                     type="number"
-                    step="0.01"
-                    placeholder="150.00"
+                    step="250"
+                    placeholder="150000"
                     value={prodBuyPrice}
                     onChange={(e) => setProdBuyPrice(e.target.value)}
                     className="w-full p-2.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl text-xs focus:outline-none focus:border-indigo-500 font-mono"
@@ -722,12 +744,12 @@ const AdminDashboard = () => {
                   />
                 </div>
                 <div>
-                  <label className="text-xs font-bold text-slate-700 dark:text-slate-300 mb-1 block">سعر البيع ($) *</label>
+                  <label className="text-xs font-bold text-slate-700 dark:text-slate-300 mb-1 block">سعر البيع (د.ع) *</label>
                   <input
                     type="number"
-                    step="0.01"
+                    step="250"
                     required
-                    placeholder="220.00"
+                    placeholder="220000"
                     value={prodSellPrice}
                     onChange={(e) => setProdSellPrice(e.target.value)}
                     className="w-full p-2.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl text-xs focus:outline-none focus:border-indigo-500 font-mono"
@@ -848,43 +870,20 @@ const AdminDashboard = () => {
               <div className="grid grid-cols-3 gap-3">
                 <div>
                   <label className="text-xs font-bold text-slate-700 dark:text-slate-300 mb-1 block">الكمية بالمخزن *</label>
-                  <input
-                    type="number"
-                    required
-                    min="0"
-                    value={editProdStock}
-                    onChange={(e) => setEditProdStock(e.target.value)}
-                    className="w-full p-2.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl text-xs focus:outline-none focus:border-indigo-500"
-                    dir="ltr"
-                  />
+                  <input type="number" required min="0" value={editProdStock} onChange={(e) => setEditProdStock(e.target.value)} className="w-full p-2.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl text-xs focus:outline-none focus:border-indigo-500" dir="ltr" />
                 </div>
                 <div>
-                  <label className="text-xs font-bold text-slate-700 dark:text-slate-300 mb-1 block">سعر التكلفة ($)</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={editProdCostPrice}
-                    onChange={(e) => setEditProdCostPrice(e.target.value)}
-                    className="w-full p-2.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl text-xs focus:outline-none focus:border-indigo-500 font-mono"
-                    dir="ltr"
-                  />
+                  <label className="text-xs font-bold text-slate-700 dark:text-slate-300 mb-1 block">سعر التكلفة (د.ع)</label>
+                  <input type="number" step="250" value={editProdCostPrice} onChange={(e) => setEditProdCostPrice(e.target.value)} className="w-full p-2.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl text-xs focus:outline-none focus:border-indigo-500 font-mono" dir="ltr" />
                 </div>
                 <div>
-                  <label className="text-xs font-bold text-slate-700 dark:text-slate-300 mb-1 block">سعر البيع ($) *</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    required
-                    value={editProdPrice}
-                    onChange={(e) => setEditProdPrice(e.target.value)}
-                    className="w-full p-2.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl text-xs focus:outline-none focus:border-indigo-500 font-mono"
-                    dir="ltr"
-                  />
+                  <label className="text-xs font-bold text-slate-700 dark:text-slate-300 mb-1 block">سعر البيع (د.ع) *</label>
+                  <input type="number" step="250" required value={editProdPrice} onChange={(e) => setEditProdPrice(e.target.value)} className="w-full p-2.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl text-xs focus:outline-none focus:border-indigo-500 font-mono" dir="ltr" />
                 </div>
               </div>
 
               <div>
-                <label className="text-xs font-bold text-slate-700 dark:text-slate-300 mb-1 block">رابط الصورة (URL)</label>
+                <label className="text-xs font-bold text-slate-700 dark:text-slate-300 mb-1 block">رابط الصورة (URL) - اختياري</label>
                 <input
                   type="url"
                   placeholder="https://images.unsplash.com/..."
@@ -893,32 +892,38 @@ const AdminDashboard = () => {
                   className="w-full p-2.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl text-xs focus:outline-none focus:border-indigo-500 font-mono"
                   dir="ltr"
                 />
-                {editProdImage && (
+              </div>
+
+              <div>
+                <label className="text-xs font-bold text-slate-700 dark:text-slate-300 mb-1 flex items-center gap-1.5">
+                  <Upload className="w-4 h-4 text-indigo-500 dark:text-indigo-400" />
+                  <span>أو ارفع صورة من الجهاز (يُرفع إلى Firebase)</span>
+                </label>
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={handleEditImageFileChange}
+                  className="w-full text-xs text-slate-500 dark:text-slate-400 file:ml-3 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-semibold file:bg-indigo-600 file:text-white hover:file:bg-indigo-500 cursor-pointer"
+                />
+                {(editProdImagePreview || editProdImage) && (
                   <div className="mt-2 flex items-center gap-3">
                     <img 
-                      src={editProdImage} 
+                      src={editProdImagePreview || editProdImage} 
                       alt="Preview" 
                       onError={(e) => { e.target.src = FALLBACK_PRODUCT_IMAGE; }}
                       className="w-12 h-12 rounded-lg object-cover border border-slate-200 dark:border-slate-800" 
                     />
-                    <span className="text-[11px] text-emerald-600 dark:text-emerald-400">معاينة الصورة</span>
+                    <span className="text-[11px] text-emerald-600 dark:text-emerald-400">
+                      {editProdImagePreview ? 'تم اختيار الصورة (سترفع عند الحفظ)' : 'الصورة الحالية'}
+                    </span>
                   </div>
                 )}
               </div>
 
               <div className="flex justify-end gap-3 pt-4 border-t border-slate-200 dark:border-slate-800">
-                <button
-                  type="button"
-                  onClick={() => setShowEditProductModal(false)}
-                  className="px-4 py-2 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 rounded-xl text-xs font-semibold cursor-pointer"
-                >
-                  إلغاء
-                </button>
-                <button
-                  type="submit"
-                  className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-semibold shadow-lg shadow-indigo-600/20 cursor-pointer"
-                >
-                  حفظ التعديلات
+                <button type="button" onClick={() => setShowEditProductModal(false)} className="px-4 py-2 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 rounded-xl text-xs font-semibold cursor-pointer">إلغاء</button>
+                <button type="submit" disabled={isUploading} className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-semibold shadow-lg shadow-indigo-600/20 cursor-pointer">
+                  {isUploading ? 'جاري الرفع...' : 'حفظ التعديلات'}
                 </button>
               </div>
             </form>
@@ -1015,8 +1020,8 @@ const AdminDashboard = () => {
                 <input type="text" placeholder="بغداد، الكرادة" value={custAddress} onChange={(e) => setCustAddress(e.target.value)} className="w-full p-2.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl text-xs focus:outline-none focus:border-indigo-500" />
               </div>
               <div>
-                <label className="text-xs font-bold text-slate-700 dark:text-slate-300 mb-1 block">الديون السابقة (إن وجدت) $</label>
-                <input type="number" step="0.01" value={custBalance} onChange={(e) => setCustBalance(e.target.value)} className="w-full p-2.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl text-xs focus:outline-none focus:border-indigo-500 font-mono" dir="ltr" />
+                <label className="text-xs font-bold text-slate-700 dark:text-slate-300 mb-1 block">الديون السابقة (إن وجدت) د.ع</label>
+                <input type="number" step="250" value={custBalance} onChange={(e) => setCustBalance(e.target.value)} className="w-full p-2.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl text-xs focus:outline-none focus:border-indigo-500 font-mono" dir="ltr" />
               </div>
               <div className="flex justify-end gap-3 pt-4 border-t border-slate-200 dark:border-slate-800">
                 <button type="button" onClick={() => setShowAddCustModal(false)} className="px-4 py-2 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 rounded-xl text-xs font-semibold">إلغاء</button>

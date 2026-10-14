@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { collection, onSnapshot, doc, setDoc, updateDoc, deleteDoc, writeBatch, addDoc } from 'firebase/firestore';
-import { db } from '../firebase/config';
+import { ref as storageRef, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
+import { db, storage } from '../firebase/config';
 import { useAuth } from './AuthContext';
 import { DEFAULT_USERS, DEFAULT_PRODUCTS, FALLBACK_PRODUCT_IMAGE } from '../firebase/defaultData';
 
@@ -150,17 +151,31 @@ export const DataProvider = ({ children }) => {
   // --- Helper Methods ---
   const generateId = (prefix) => `${prefix}${Date.now()}${Math.floor(Math.random() * 1000)}`;
 
+  // Upload image file to Firebase Storage and return download URL
+  const uploadProductImage = async (imageFile, productId) => {
+    try {
+      const fileExt = imageFile.name.split('.').pop() || 'jpg';
+      const filePath = `products/${productId}.${fileExt}`;
+      const fileRef = storageRef(storage, filePath);
+      const uploadTask = uploadBytesResumable(fileRef, imageFile);
+      await new Promise((resolve, reject) => {
+        uploadTask.on('state_changed', null, reject, resolve);
+      });
+      const downloadUrl = await getDownloadURL(fileRef);
+      return downloadUrl;
+    } catch (err) {
+      console.warn('Firebase Storage upload failed, using local URL fallback:', err);
+      return URL.createObjectURL(imageFile);
+    }
+  };
+
   // Product Management (Both Admin and Storekeeper have full access)
   const addProduct = async (productData, imageFile) => {
     try {
       const newId = generateId('p');
       let imageVal = productData.image || productData.imageUrl || FALLBACK_PRODUCT_IMAGE;
       if (imageFile) {
-        try {
-          imageVal = URL.createObjectURL(imageFile);
-        } catch {
-          imageVal = FALLBACK_PRODUCT_IMAGE;
-        }
+        imageVal = await uploadProductImage(imageFile, newId);
       }
 
       const stockNum = Number(productData.stock !== undefined ? productData.stock : productData.mainStock) || 0;
@@ -187,6 +202,20 @@ export const DataProvider = ({ children }) => {
       return { success: true, id: newId };
     } catch (error) {
       console.error("Error adding product:", error);
+      return { success: false, error: error.message };
+    }
+  };
+
+  const updateProductWithImage = async (id, updates, imageFile) => {
+    try {
+      if (imageFile) {
+        const downloadUrl = await uploadProductImage(imageFile, id);
+        updates.image = downloadUrl;
+        updates.imageUrl = downloadUrl;
+      }
+      return await updateProduct(id, updates);
+    } catch (error) {
+      console.error('Error updating product with image:', error);
       return { success: false, error: error.message };
     }
   };
@@ -285,11 +314,18 @@ export const DataProvider = ({ children }) => {
   // Customer Management
   const addCustomer = async (custData) => {
     const id = generateId('c');
-    await setDoc(doc(db, 'customers', id), {
+    const newCustomer = {
       ...custData,
       id,
-      balance: Number(custData.balance) || 0
-    });
+      storeName: String(custData.storeName || custData.name || '').trim(),
+      ownerName: String(custData.ownerName || '').trim(),
+      phone: String(custData.phone || '').trim(),
+      address: String(custData.address || '').trim(),
+      balance: Number(custData.balance) || 0,
+      createdAt: Date.now()
+    };
+    await setDoc(doc(db, 'customers', id), newCustomer);
+    return { success: true, id, customer: newCustomer };
   };
 
   // Inventory Management - Stock Transfer to Sales Rep ("تحميل بضاعة للمندوب")
@@ -441,6 +477,96 @@ export const DataProvider = ({ children }) => {
     } catch (error) {
       console.error("submitInventoryLoad critical error:", error);
       return { success: false, error: error.message || 'حدث خطأ أثناء تحميل البضاعة.' };
+    }
+  };
+
+  // Inventory Return from Sales Rep back to Main Warehouse (إرجاع بضاعة من المندوب)
+  const submitInventoryReturn = async ({ repId, items }) => {
+    try {
+      if (!repId) return { success: false, error: 'الرجاء اختيار المندوب.' };
+      if (!items || !items.length) return { success: false, error: 'الرجاء تحديد كميات للإرجاع.' };
+
+      const targetRep = users.find(u => u.id === repId);
+      const repName = targetRep?.name || 'المندوب';
+
+      // Validate return quantities against rep's actual stock
+      const existingRepItems = subInventories[repId] ? [...subInventories[repId]] : [];
+      for (const returnItem of items) {
+        const qty = Number(returnItem.qty) || 0;
+        const repItem = existingRepItems.find(r => r.productId === returnItem.productId);
+        const repQty = Number(repItem?.qty) || 0;
+        if (qty > repQty) {
+          const prod = products.find(p => p.id === returnItem.productId);
+          return { success: false, error: `الكمية المُرجعة للمنتج (${prod?.name || returnItem.productId}) تتجاوز رصيد المندوب (${repQty}).` };
+        }
+      }
+
+      // Calculate new rep stock after return
+      const updatedRepItems = existingRepItems.map(repItem => {
+        const returnEntry = items.find(r => r.productId === repItem.productId);
+        if (returnEntry) {
+          return { ...repItem, qty: Math.max(0, (Number(repItem.qty) || 0) - (Number(returnEntry.qty) || 0)) };
+        }
+        return repItem;
+      }).filter(r => r.qty > 0);
+
+      const timestamp = Date.now();
+      const storekeeperId = currentUser?.id || 'storekeeper';
+      const storekeeperName = currentUser?.name || 'أمين المخزن';
+      const returnId = generateId('ret');
+      const logId = generateId('log_ret');
+
+      const returnRecord = {
+        id: returnId,
+        timestamp,
+        type: 'return',
+        storekeeperId,
+        storekeeperName,
+        repId,
+        repName,
+        items: items.map(i => {
+          const prod = products.find(p => p.id === i.productId);
+          return { productId: i.productId, name: prod?.name || 'غير معروف', qty: Number(i.qty) || 0, price: Number(prod?.price || prod?.sellPrice || 0) };
+        }),
+        totalUnits: items.reduce((s, i) => s + (Number(i.qty) || 0), 0)
+      };
+
+      const batch = writeBatch(db);
+
+      // 1. Add returned quantities back to main product stock
+      items.forEach(returnItem => {
+        const qty = Number(returnItem.qty) || 0;
+        const p = products.find(prod => prod.id === returnItem.productId);
+        if (p) {
+          const currentStock = Number(p.stock !== undefined ? p.stock : p.mainStock) || 0;
+          const newStock = currentStock + qty;
+          batch.update(doc(db, 'products', p.id), { stock: newStock, mainStock: newStock });
+        }
+      });
+
+      // 2. Deduct returned quantities from rep's stock
+      batch.set(doc(db, 'subInventories', repId), { items: updatedRepItems }, { merge: true });
+      batch.set(doc(db, 'rep_inventory', repId), { repId, items: updatedRepItems, updatedAt: timestamp }, { merge: true });
+      batch.set(doc(db, 'users', repId), { inventory: updatedRepItems }, { merge: true });
+
+      // 3. Log the return
+      batch.set(doc(db, 'transfers', returnId), returnRecord);
+      batch.set(doc(db, 'inventoryLogs', logId), {
+        id: logId, type: 'return', timestamp,
+        handledBy: storekeeperId, handledByName: storekeeperName,
+        targetRepId: repId, targetRepName: repName,
+        items: returnRecord.items
+      });
+
+      await batch.commit();
+
+      // Optimistic UI update
+      setSubInventories(prev => ({ ...prev, [repId]: updatedRepItems }));
+
+      return { success: true };
+    } catch (error) {
+      console.error('submitInventoryReturn error:', error);
+      return { success: false, error: error.message || 'حدث خطأ أثناء الإرجاع.' };
     }
   };
 
@@ -659,10 +785,10 @@ export const DataProvider = ({ children }) => {
 
   const value = {
     users, addUser, updateUser, removeUser, toggleUserActive,
-    products, addProduct, updateProduct, deleteProduct,
+    products, addProduct, updateProduct, updateProductWithImage, deleteProduct,
     customers, addCustomer,
     subInventories,
-    transfers, inventoryLogs, submitInventoryLoad,
+    transfers, inventoryLogs, submitInventoryLoad, submitInventoryReturn,
     orders, createPOSOrder, submitCustomerOrder,
     getFinancialStats
   };

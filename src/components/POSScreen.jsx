@@ -1,16 +1,17 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useData } from '../context/DataContext';
 import ReceiptModal from './ReceiptModal';
 import { FALLBACK_PRODUCT_IMAGE } from '../firebase/defaultData';
+import { formatIQD } from '../utils/currency';
 import { 
-  Search, User, ShoppingCart, DollarSign, Plus, Minus, Trash2, 
-  Receipt, Store, Phone, MapPin, AlertTriangle
+  Search, User, ShoppingCart, Plus, Minus, Trash2, 
+  Receipt, Store, Phone, MapPin, AlertTriangle, UserPlus, Edit2, Check, X
 } from 'lucide-react';
 
 const POSScreen = () => {
   const { currentUser, userRole } = useAuth();
-  const { products, customers, subInventories, createPOSOrder } = useData();
+  const { products, customers, subInventories, createPOSOrder, addCustomer } = useData();
 
   // Selected customer state
   const [selectedCustomerId, setSelectedCustomerId] = useState('');
@@ -28,6 +29,16 @@ const POSScreen = () => {
   // Completed Order for Receipt Modal
   const [completedOrder, setCompletedOrder] = useState(null);
   const [errorMessage, setErrorMessage] = useState('');
+
+  // Add Customer On-the-Fly modal state
+  const [showAddCustModal, setShowAddCustModal] = useState(false);
+  const [newCustName, setNewCustName] = useState('');
+  const [newCustPhone, setNewCustPhone] = useState('');
+  const [addCustLoading, setAddCustLoading] = useState(false);
+
+  // Editable price state: { productId: string }
+  const [editingPriceId, setEditingPriceId] = useState(null);
+  const [editingPriceValue, setEditingPriceValue] = useState('');
 
   // Active customer object
   const selectedCustomer = useMemo(() => {
@@ -52,22 +63,21 @@ const POSScreen = () => {
         return {
           ...prod,
           sellPrice: Number(prod.sellPrice || prod.price || 0),
-          buyPrice: Number(prod.buyPrice || 0),
+          costPrice: Number(prod.costPrice || prod.buyPrice || 0),
           availableStock: subQty
         };
       }).filter(p => p.availableStock > 0 || productSearch.length > 0);
     } else {
-      // Storekeeper / Admin direct sale from mainStock
       return products.map(prod => ({
         ...prod,
         sellPrice: Number(prod.sellPrice || prod.price || 0),
-        buyPrice: Number(prod.buyPrice || 0),
+        costPrice: Number(prod.costPrice || prod.buyPrice || 0),
         availableStock: Number(prod.mainStock !== undefined ? prod.mainStock : prod.stock) || 0
       }));
     }
   }, [products, subInventories, currentUser, userRole, productSearch]);
 
-  // Filtered product catalog for autocomplete/search
+  // Filtered product catalog
   const filteredProducts = useMemo(() => {
     return availableProducts.filter(p => {
       const matchesSearch = p.name.toLowerCase().includes(productSearch.toLowerCase()) || 
@@ -145,8 +155,63 @@ const POSScreen = () => {
     setCart(prev => prev.filter(item => item.product.id !== productId));
   };
 
+  // Price editing handlers with cost price protection
+  const handleStartEditPrice = (item) => {
+    setEditingPriceId(item.product.id);
+    setEditingPriceValue(String(item.price));
+  };
+
+  const handleConfirmEditPrice = (item) => {
+    const newPrice = parseFloat(editingPriceValue);
+    const costPrice = Number(item.product.costPrice || item.product.buyPrice || 0);
+
+    if (isNaN(newPrice) || newPrice <= costPrice) {
+      alert(`لا يمكن البيع بأقل من أو بسعر الشراء!\nسعر الشراء: ${formatIQD(costPrice)}\nسعر البيع يجب أن يكون أكبر من ${formatIQD(costPrice)}`);
+      setEditingPriceValue(String(item.price)); // reset to default
+      setEditingPriceId(null);
+      return;
+    }
+
+    setCart(prev => prev.map(cartItem =>
+      cartItem.product.id === item.product.id
+        ? { ...cartItem, price: newPrice }
+        : cartItem
+    ));
+    setEditingPriceId(null);
+  };
+
+  const handleCancelEditPrice = () => {
+    setEditingPriceId(null);
+    setEditingPriceValue('');
+  };
+
+  // Add customer on-the-fly
+  const handleAddCustomer = async (e) => {
+    e.preventDefault();
+    if (!newCustName.trim()) return;
+    setAddCustLoading(true);
+    try {
+      const result = await addCustomer({
+        storeName: newCustName.trim(),
+        ownerName: newCustName.trim(),
+        phone: newCustPhone.trim(),
+        address: '',
+        balance: 0
+      });
+      if (result?.success && result?.id) {
+        setSelectedCustomerId(result.id);
+      }
+    } catch (err) {
+      console.error('Add customer error:', err);
+    }
+    setAddCustLoading(false);
+    setShowAddCustModal(false);
+    setNewCustName('');
+    setNewCustPhone('');
+  };
+
   // Submit Order & Print Receipt
-  const handleCheckout = () => {
+  const handleCheckout = async () => {
     setErrorMessage('');
     if (!selectedCustomer) {
       setErrorMessage('الرجاء اختيار الزبون قبل إتمام الطلب.');
@@ -163,7 +228,7 @@ const POSScreen = () => {
       role: userRole || 'sales_rep'
     };
 
-    const res = createPOSOrder({
+    const res = await createPOSOrder({
       sellerUser: sellerInfo,
       customer: selectedCustomer,
       cartItems: cart,
@@ -221,7 +286,7 @@ const POSScreen = () => {
       {/* Main POS 2-Column Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         
-        {/* RIGHT COLUMN in RTL: Product Catalog & Auto-complete Search (8 cols) */}
+        {/* RIGHT COLUMN in RTL: Product Catalog (8 cols) */}
         <div className="lg:col-span-7 xl:col-span-8 flex flex-col gap-6">
           
           {/* Search & Category Filter */}
@@ -313,14 +378,14 @@ const POSScreen = () => {
                         {product.name}
                       </h3>
                       <div className="mt-1 text-base font-bold text-indigo-600 dark:text-indigo-400 font-mono">
-                        ${product.sellPrice.toFixed(2)}
+                        {formatIQD(product.sellPrice)}
                       </div>
                     </div>
                   </div>
 
                   {/* Add Action Bar */}
                   <div className="pt-2 border-t border-slate-200 dark:border-slate-800/60 flex items-center justify-between text-xs">
-                    <span className="text-slate-500 dark:text-slate-400">سعر الشراء: ${product.buyPrice}</span>
+                    <span className="text-slate-500 dark:text-slate-400">ت.شراء: {formatIQD(product.costPrice)}</span>
                     <button className={`flex items-center gap-1 px-3 py-1.5 rounded-lg font-medium transition-all ${
                       itemInCart
                         ? 'bg-indigo-600 text-white'
@@ -360,20 +425,30 @@ const POSScreen = () => {
               )}
             </div>
 
-            {/* Customer Dropdown */}
-            <select
-              value={selectedCustomerId}
-              onChange={(e) => setSelectedCustomerId(e.target.value)}
-              className="w-full p-3 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl text-sm focus:outline-none focus:border-indigo-500 cursor-pointer"
-            >
-              <option value="">-- اختر الزبون من القائمة --</option>
-              <option value="cash_customer" className="font-bold text-emerald-600 dark:text-emerald-400">زبون نقدي</option>
-              {customers.map(c => (
-                <option key={c.id} value={c.id}>
-                  {c.storeName} ({c.ownerName}) - الديون: ${c.balance.toFixed(2)}
-                </option>
-              ))}
-            </select>
+            {/* Customer Dropdown + Add Button */}
+            <div className="flex gap-2">
+              <select
+                value={selectedCustomerId}
+                onChange={(e) => setSelectedCustomerId(e.target.value)}
+                className="flex-1 p-3 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl text-sm focus:outline-none focus:border-indigo-500 cursor-pointer"
+              >
+                <option value="">-- اختر الزبون من القائمة --</option>
+                <option value="cash_customer" className="font-bold text-emerald-600">زبون نقدي</option>
+                {customers.map(c => (
+                  <option key={c.id} value={c.id}>
+                    {c.storeName} ({c.ownerName}) - الديون: {formatIQD(c.balance)}
+                  </option>
+                ))}
+              </select>
+              <button
+                onClick={() => setShowAddCustModal(true)}
+                title="إضافة زبون جديد"
+                className="flex items-center gap-1.5 px-3 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold rounded-xl shadow-md shadow-emerald-600/20 transition-all cursor-pointer shrink-0"
+              >
+                <UserPlus className="w-4 h-4" />
+                <span className="hidden sm:inline">جديد</span>
+              </button>
+            </div>
 
             {/* Loaded Customer Info Card */}
             {selectedCustomer ? (
@@ -394,7 +469,7 @@ const POSScreen = () => {
                   <div className="pt-2 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between">
                     <span className="text-slate-600 dark:text-slate-400">الديون السابقة (الباقي):</span>
                     <span className="font-mono font-bold text-amber-600 dark:text-amber-400 text-sm">
-                      ${selectedCustomer.balance.toFixed(2)}
+                      {formatIQD(selectedCustomer.balance)}
                     </span>
                   </div>
                 )}
@@ -420,44 +495,80 @@ const POSScreen = () => {
               </div>
 
               {/* Cart Table */}
-              <div className="max-h-[220px] overflow-y-auto space-y-2 pl-1 mb-4">
+              <div className="max-h-[260px] overflow-y-auto space-y-2 pl-1 mb-4">
                 {cart.map(item => (
                   <div 
                     key={item.product.id}
-                    className="flex items-center justify-between bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800/80 p-2.5 rounded-xl text-xs"
+                    className="flex flex-col bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800/80 p-2.5 rounded-xl text-xs gap-2"
                   >
-                    <div className="flex-1 pr-2">
-                      <div className="font-semibold line-clamp-1">{item.product.name}</div>
-                      <div className="text-slate-500 dark:text-slate-400 font-mono">${item.price.toFixed(2)} / وحدة</div>
-                    </div>
-
-                    <div className="flex items-center gap-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg p-1" dir="ltr">
-                      <button 
-                        onClick={() => handleUpdateQty(item.product.id, -1)}
-                        className="p-1 text-slate-400 hover:text-slate-900 dark:hover:text-white rounded hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
+                    {/* Row 1: Name + Remove */}
+                    <div className="flex items-center justify-between">
+                      <div className="font-semibold line-clamp-1 flex-1 pr-2">{item.product.name}</div>
+                      <button
+                        onClick={() => handleRemoveFromCart(item.product.id)}
+                        className="text-slate-400 hover:text-rose-500 p-1 cursor-pointer"
+                        title="حذف"
                       >
-                        <Minus className="w-3 h-3" />
-                      </button>
-                      <span className="font-mono font-bold px-1.5">{item.qty}</span>
-                      <button 
-                        onClick={() => handleUpdateQty(item.product.id, 1)}
-                        className="p-1 text-slate-400 hover:text-slate-900 dark:hover:text-white rounded hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
-                      >
-                        <Plus className="w-3 h-3" />
+                        <Trash2 className="w-3.5 h-3.5" />
                       </button>
                     </div>
 
-                    <div className="w-16 text-left font-mono font-bold text-indigo-600 dark:text-indigo-400 pr-2">
-                      ${(item.price * item.qty).toFixed(2)}
-                    </div>
+                    {/* Row 2: Price edit + Qty + Total */}
+                    <div className="flex items-center gap-2">
+                      {/* Editable Price */}
+                      <div className="flex items-center gap-1 flex-1">
+                        {editingPriceId === item.product.id ? (
+                          <>
+                            <input
+                              type="number"
+                              value={editingPriceValue}
+                              onChange={(e) => setEditingPriceValue(e.target.value)}
+                              className="w-24 px-2 py-1 bg-white dark:bg-slate-900 border border-indigo-400 rounded-lg text-xs font-mono focus:outline-none"
+                              dir="ltr"
+                              autoFocus
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') handleConfirmEditPrice(item);
+                                if (e.key === 'Escape') handleCancelEditPrice();
+                              }}
+                            />
+                            <button onClick={() => handleConfirmEditPrice(item)} className="p-1 text-emerald-500 hover:text-emerald-700 cursor-pointer"><Check className="w-3 h-3" /></button>
+                            <button onClick={handleCancelEditPrice} className="p-1 text-rose-500 hover:text-rose-700 cursor-pointer"><X className="w-3 h-3" /></button>
+                          </>
+                        ) : (
+                          <button
+                            onClick={() => handleStartEditPrice(item)}
+                            className="flex items-center gap-1 text-slate-500 dark:text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 font-mono cursor-pointer"
+                            title="تعديل السعر"
+                          >
+                            <span>{formatIQD(item.price)}</span>
+                            <Edit2 className="w-3 h-3 opacity-60" />
+                          </button>
+                        )}
+                        <span className="text-slate-400">/ وحدة</span>
+                      </div>
 
-                    <button
-                      onClick={() => handleRemoveFromCart(item.product.id)}
-                      className="mr-2 text-slate-400 hover:text-rose-500 p-1 cursor-pointer"
-                      title="حذف"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
+                      {/* Qty Controls */}
+                      <div className="flex items-center gap-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg p-1" dir="ltr">
+                        <button 
+                          onClick={() => handleUpdateQty(item.product.id, -1)}
+                          className="p-1 text-slate-400 hover:text-slate-900 dark:hover:text-white rounded hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
+                        >
+                          <Minus className="w-3 h-3" />
+                        </button>
+                        <span className="font-mono font-bold px-1.5">{item.qty}</span>
+                        <button 
+                          onClick={() => handleUpdateQty(item.product.id, 1)}
+                          className="p-1 text-slate-400 hover:text-slate-900 dark:hover:text-white rounded hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
+                        >
+                          <Plus className="w-3 h-3" />
+                        </button>
+                      </div>
+
+                      {/* Item Total */}
+                      <div className="w-20 text-left font-mono font-bold text-indigo-600 dark:text-indigo-400">
+                        {formatIQD(item.price * item.qty)}
+                      </div>
+                    </div>
                   </div>
                 ))}
 
@@ -473,39 +584,36 @@ const POSScreen = () => {
             <div className="space-y-3 pt-3 border-t border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 p-4 rounded-xl">
               <div className="flex justify-between text-xs text-slate-600 dark:text-slate-300">
                 <span>مجموع القائمة الحالية:</span>
-                <span className="font-mono font-semibold">${invoiceSubtotal.toFixed(2)}</span>
+                <span className="font-mono font-semibold">{formatIQD(invoiceSubtotal)}</span>
               </div>
               <div className="flex justify-between text-xs text-amber-600 dark:text-amber-400">
                 <span>الديون السابقة (الباقي):</span>
-                <span className="font-mono font-semibold">+ ${previousDebt.toFixed(2)}</span>
+                <span className="font-mono font-semibold">+ {formatIQD(previousDebt)}</span>
               </div>
 
               <div className="flex justify-between text-sm font-bold pt-2 border-t border-slate-200 dark:border-slate-800">
                 <span>المجموع الكلي:</span>
-                <span className="font-mono text-emerald-600 dark:text-emerald-400 text-base">${grandTotal.toFixed(2)}</span>
+                <span className="font-mono text-emerald-600 dark:text-emerald-400 text-base">{formatIQD(grandTotal)}</span>
               </div>
 
               {/* Paid Amount Input */}
               <div className="pt-2">
-                <label className="text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1 block">المبلغ الواصل (المدفوع):</label>
-                <div className="relative">
-                  <DollarSign className="w-4 h-4 absolute right-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                  <input
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    placeholder="أدخل المبلغ المدفوع..."
-                    value={paidAmount}
-                    onChange={(e) => setPaidAmount(e.target.value)}
-                    className="w-full pr-9 pl-3 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-sm text-emerald-600 dark:text-emerald-400 font-mono font-bold focus:outline-none focus:border-indigo-500 text-left"
-                    dir="ltr"
-                  />
-                </div>
+                <label className="text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1 block">المبلغ الواصل (المدفوع) بالدينار:</label>
+                <input
+                  type="number"
+                  min="0"
+                  step="250"
+                  placeholder="أدخل المبلغ المدفوع..."
+                  value={paidAmount}
+                  onChange={(e) => setPaidAmount(e.target.value)}
+                  className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-sm text-emerald-600 dark:text-emerald-400 font-mono font-bold focus:outline-none focus:border-indigo-500 text-left"
+                  dir="ltr"
+                />
               </div>
 
               <div className="flex justify-between text-xs text-rose-600 dark:text-rose-400 pt-1 font-bold">
                 <span>الباقي (الديون المحدثة):</span>
-                <span className="font-mono text-sm">${remainingDebt.toFixed(2)}</span>
+                <span className="font-mono text-sm">{formatIQD(remainingDebt)}</span>
               </div>
 
               {/* Submit & Print Receipt Button */}
@@ -528,6 +636,64 @@ const POSScreen = () => {
         </div>
 
       </div>
+
+      {/* Add Customer On-the-Fly Modal */}
+      {showAddCustModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4" dir="rtl">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 max-w-sm w-full shadow-2xl animate-in fade-in zoom-in-95 duration-200">
+            <div className="flex items-center justify-between mb-5">
+              <h3 className="text-base font-bold flex items-center gap-2">
+                <UserPlus className="w-5 h-5 text-emerald-500" />
+                إضافة زبون جديد
+              </h3>
+              <button onClick={() => setShowAddCustModal(false)} className="p-1.5 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 cursor-pointer">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <form onSubmit={handleAddCustomer} className="space-y-4">
+              <div>
+                <label className="text-xs font-bold text-slate-700 dark:text-slate-300 mb-1 block">اسم الزبون / المحل *</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="مثال: أسواق الريان"
+                  value={newCustName}
+                  onChange={(e) => setNewCustName(e.target.value)}
+                  className="w-full p-2.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl text-sm focus:outline-none focus:border-indigo-500"
+                  autoFocus
+                />
+              </div>
+              <div>
+                <label className="text-xs font-bold text-slate-700 dark:text-slate-300 mb-1 block">رقم الهاتف</label>
+                <input
+                  type="text"
+                  placeholder="+964 770..."
+                  value={newCustPhone}
+                  onChange={(e) => setNewCustPhone(e.target.value)}
+                  className="w-full p-2.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl text-sm focus:outline-none focus:border-indigo-500"
+                  dir="ltr"
+                />
+              </div>
+              <div className="flex justify-end gap-3 pt-2 border-t border-slate-200 dark:border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setShowAddCustModal(false)}
+                  className="px-4 py-2 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 rounded-xl text-xs font-semibold cursor-pointer"
+                >
+                  إلغاء
+                </button>
+                <button
+                  type="submit"
+                  disabled={addCustLoading}
+                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-semibold shadow-lg shadow-emerald-600/20 cursor-pointer"
+                >
+                  {addCustLoading ? 'جاري الحفظ...' : 'حفظ واختيار'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* Thermal Printable Receipt Modal */}
       {completedOrder && (
